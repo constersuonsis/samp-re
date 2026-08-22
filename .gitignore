@@ -1,0 +1,24 @@
+# IDA Pro reverse engineering artifacts (local only, not for the repo)
+ida/
+
+# Build output
+build/
+out/
+bin/
+obj/
+*.obj
+*.exe
+*.pdb
+*.ilk
+
+# IDE / editor / local tooling
+.vs/
+.vscode/
+.claude/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
