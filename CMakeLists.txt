@@ -38,6 +38,8 @@ add_library(samp_client STATIC
     src/crypto/xtea.cpp
     src/crypto/packet_checksum.cpp
     src/crypto/packet_codec.cpp
+    src/crypto/aes128.cpp
+    src/crypto/rsa.cpp
     src/vehicle/vehicle_pool.cpp
     src/vehicle/vehicle_pool_sync.cpp
     src/vehicle/vehicle_sync_cache.cpp

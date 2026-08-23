@@ -122,3 +122,18 @@ add_executable(player_sync_cache_tests player_sync_cache_tests.cpp)
 target_link_libraries(player_sync_cache_tests PRIVATE samp_client)
 
 add_test(NAME player_sync_cache COMMAND player_sync_cache_tests)
+
+add_executable(aes128_tests aes128_tests.cpp)
+target_link_libraries(aes128_tests PRIVATE samp_client)
+
+add_test(NAME aes128 COMMAND aes128_tests)
+
+add_executable(rsa_tests rsa_tests.cpp)
+target_link_libraries(rsa_tests PRIVATE samp_client)
+
+add_test(NAME rsa COMMAND rsa_tests)
+
+add_executable(bigint_tests bigint_tests.cpp)
+target_link_libraries(bigint_tests PRIVATE samp_client raknet)
+
+add_test(NAME bigint COMMAND bigint_tests)
