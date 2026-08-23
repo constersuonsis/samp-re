@@ -16,8 +16,6 @@ void Check(bool condition, const char* what) {
     }
 }
 
-/// Every id the client registers a handler for. Two entries sharing a value
-/// would mean one of them silently never fires.
 std::vector<samp::protocol::RpcId> IncomingIds() {
     using samp::protocol::RpcId;
     return {RpcId::SetPlayerPosition,     RpcId::SetPlayerHealth,
@@ -104,8 +102,7 @@ void TestRegisteredIdsAreUnique() {
 }
 
 void TestIdsFitOneByte() {
-    // The id is written as a single byte, so anything above 255 would be
-    // silently truncated on the wire.
+
     for (samp::protocol::RpcId id : IncomingIds()) {
         samp::net::BitStream stream;
         stream.Write(samp::protocol::ToByte(id));
@@ -122,27 +119,24 @@ void TestEmptyBodiedIdsAreMarked() {
     using samp::protocol::HasEmptyBody;
     using samp::protocol::RpcId;
 
-    // These arrive as nothing but an id.
     Check(HasEmptyBody(RpcId::GameModeRestart), "a game mode restart has no body");
     Check(HasEmptyBody(RpcId::DisableCheckpoint), "disabling a checkpoint has no body");
     Check(HasEmptyBody(RpcId::StopAudioStream), "stopping the stream has no body");
     Check(HasEmptyBody(RpcId::SetCameraBehindPlayer), "resetting the camera has no body");
 
-    // Their close relatives do carry fields, so the distinction is not by name.
     Check(!HasEmptyBody(RpcId::SetCheckpoint), "setting a checkpoint does carry fields");
     Check(!HasEmptyBody(RpcId::PlayAudioStream), "starting a stream does carry fields");
     Check(!HasEmptyBody(RpcId::SetPlayerCameraPosition), "moving the camera carries fields");
 }
 
 void TestPlayerAndVehicleDamageAreDistinct() {
-    // Player damage and vehicle damage are unrelated messages that both mention
-    // damage; collapsing them into one id would break both.
+
     Check(samp::protocol::ToByte(samp::protocol::RpcId::GiveTakeDamage) !=
               samp::protocol::ToByte(samp::protocol::RpcId::VehicleDamageStatus),
           "player damage and vehicle damage use different ids");
 }
 
-}  // namespace
+}
 
 int main() {
     TestRegisteredIdsAreUnique();

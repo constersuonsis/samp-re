@@ -1,6 +1,9 @@
 # IDA Pro reverse engineering artifacts (local only, not for the repo)
 ida/
 
+# Tests (kept local only)
+tests/
+
 # Build output
 build/
 out/

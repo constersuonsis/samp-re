@@ -24,7 +24,6 @@ void TestChatRoundTrip() {
     samp::net::BitStream stream;
     samp::protocol::WriteChatMessage(stream, sent);
 
-    // Two bytes of player id, one of length, then the text itself.
     Check(stream.GetNumberOfBitsUsed() == (2 + 1 + 11) * 8, "chat message costs no padding");
 
     samp::protocol::ChatMessage received;
@@ -57,7 +56,7 @@ void TestClientMessageRoundTrip() {
 }
 
 void TestOversizedLengthIsRejected() {
-    // A four-byte length field can claim far more than the client will accept.
+
     samp::net::BitStream stream;
     stream.Write<std::uint32_t>(0xFFFFFF);
     stream.Write<std::uint32_t>(0xDEADBEEF);
@@ -69,7 +68,7 @@ void TestOversizedLengthIsRejected() {
 }
 
 void TestTruncatedStringIsRejected() {
-    // Claim eight bytes of text but supply only three.
+
     samp::net::BitStream stream;
     stream.Write<std::uint16_t>(3);
     stream.Write<std::uint8_t>(8);
@@ -162,8 +161,7 @@ void TestPickupRoundTrip() {
 }
 
 void TestPickupSlotIsBoundsChecked() {
-    // The slot indexes a fixed array, so a value from the network must not be
-    // trusted to be inside it.
+
     samp::net::BitStream stream;
     stream.Write<std::uint32_t>(samp::protocol::kPickupPoolSize);
     stream.Write<std::int32_t>(1274);
@@ -260,8 +258,7 @@ void TestCameraMessages() {
 }
 
 void TestUnknownCutTypeFallsBack() {
-    // Only two modes exist; the client substitutes the second for anything else
-    // rather than passing an unknown value into the camera code.
+
     samp::net::BitStream stream;
     stream.WriteBytes("\0\0\0\0\0\0\0\0\0\0\0\0", 12);
     stream.Write<std::uint8_t>(99);
@@ -292,14 +289,12 @@ void TestVehiclePlacementMessages() {
 void TestPoolLimits() {
     using namespace samp::protocol;
 
-    // Players and objects accept their top value; vehicles stop one short.
     Check(IsValidPlayerId(kMaxPlayerId), "the top player id is inside the pool");
     Check(!IsValidPlayerId(kMaxPlayerId + 1), "one past the top player id is outside");
     Check(IsValidObjectId(kMaxObjectId), "the top object id is inside the pool");
     Check(!IsValidVehicleId(kVehiclePoolSize), "the vehicle pool size is not a valid id");
     Check(IsValidVehicleId(kVehiclePoolSize - 1), "the last vehicle slot is valid");
 
-    // Actors and objects share a limit but not the comparison that guards it.
     Check(kActorPoolSize == kMaxObjectId, "actors and objects share a limit value");
     Check(IsValidObjectId(kMaxObjectId), "the object limit is inclusive");
     Check(!IsValidActorId(kActorPoolSize), "the actor limit is not");
@@ -364,7 +359,6 @@ void TestCompressedTextRoundTrip() {
     samp::net::BitStream stream;
     samp::protocol::WriteCompressedText(stream, body);
 
-    // Compression has to actually pay for itself on ordinary prose.
     Check(stream.GetNumberOfBitsUsed() < static_cast<int>(body.size()) * 8,
           "compressed text is smaller than the plain bytes");
 
@@ -375,8 +369,7 @@ void TestCompressedTextRoundTrip() {
 }
 
 void TestDialogWithCompressedBody() {
-    // The real packet is a header followed by the compressed body, so the two
-    // have to line up when read one after the other.
+
     const samp::protocol::DialogHeader header{7, 2, "Shop", "Buy", "Leave"};
     const std::string body = "Item one\nItem two\nItem three";
 
@@ -413,7 +406,6 @@ void TestWeaponMessages() {
               given.ammo == 150,
           "weapon and ammunition round-trip");
 
-    // The ammo-only message is deliberately narrower than the give message.
     samp::net::BitStream ammoStream;
     samp::protocol::WriteSetPlayerAmmo(ammoStream, {3, 9999});
     Check(ammoStream.GetNumberOfBitsUsed() == 3 * 8, "setting ammunition costs three bytes");
@@ -443,13 +435,11 @@ void TestSpectateMessages() {
 void TestSpectateFallbackDiffersByTarget() {
     using samp::protocol::CameraModeForSpectate;
 
-    // The named modes behave identically for both kinds of target.
     Check(CameraModeForSpectate(2, false) == CameraModeForSpectate(2, true),
           "mode two maps the same either way");
     Check(CameraModeForSpectate(3, false) == CameraModeForSpectate(3, true),
           "mode three maps the same either way");
 
-    // The fallback is the one place the two messages part company.
     Check(CameraModeForSpectate(0, false) == 4, "watching a player falls back to one mode");
     Check(CameraModeForSpectate(0, true) == 3, "watching a vehicle falls back to another");
 }
@@ -471,7 +461,6 @@ void TestFreeStandingObject() {
     samp::net::BitStream stream;
     samp::protocol::WriteCreateObject(stream, sent);
 
-    // Without an attachment the block in the middle is absent entirely.
     Check(stream.GetNumberOfBitsUsed() == 40 * 8, "an unattached object is forty bytes");
 
     samp::protocol::CreateObject received;
@@ -604,7 +593,6 @@ void TestMaterialModelRulesDiffer() {
 
     const std::uint16_t pastRange = samp::protocol::kMaxMaterialModelId + 1;
 
-    // The same value means different things in the two messages that carry it.
     Check(NormaliseMaterialModelId(pastRange, MaterialModelRule::RejectAboveRange) == -1,
           "creating an object treats a model past the range as absent");
     Check(NormaliseMaterialModelId(pastRange, MaterialModelRule::RejectSentinelOnly) == pastRange,
@@ -651,7 +639,7 @@ void TestOverlongNameStaysReadableButInvalid() {
 
     samp::net::BitStream stream;
     samp::protocol::WriteObjectMaterial(stream, material);
-    // A second entry has to survive the first one being malformed.
+
     samp::protocol::WriteObjectMaterial(stream, MakeTextureMaterial());
 
     samp::protocol::ObjectMaterial first;
@@ -704,7 +692,6 @@ void TestMoveObjectRoundTrip() {
     Check(received.speed == 2.5f, "speed round-trips");
     Check(received.targetRotation.z == 180.0f, "target rotation round-trips");
 
-    // The ignored field still has to survive, or everything after it shifts.
     Check(received.currentPosition.x == 1.0f && received.currentPosition.z == 3.0f,
           "the unused current position is still parsed correctly");
 }
@@ -745,8 +732,7 @@ void TestTextDrawRoundTrip() {
 }
 
 void TestTextDrawModelPreview() {
-    // The preview fields sit at the tail of the block and are only meaningful
-    // for one style value, but they occupy their bytes either way.
+
     samp::protocol::ShowTextDraw sent;
     sent.textDrawId = 5;
     sent.style.style = samp::protocol::kTextDrawPreviewStyle;
@@ -786,8 +772,7 @@ void TestTextDrawHideAndUpdate() {
 }
 
 void TestTextDrawLimitsDifferByOne() {
-    // The two messages disagree about the maximum by exactly one byte, and the
-    // difference is load-bearing rather than incidental.
+
     const std::string atLimit(samp::protocol::kMaxTextDrawTextLength, 'x');
 
     samp::net::BitStream updateStream;
@@ -819,7 +804,6 @@ void TestPlayerNameRoundTrip() {
     Check(name.playerId == 4 && name.name == "Nickname", "name round-trips");
     Check(name.Accepted(), "a successful rename is reported as accepted");
 
-    // A rejected rename still carries the attempted name.
     samp::net::BitStream rejectedStream;
     samp::protocol::WriteSetPlayerName(rejectedStream, {4, "Taken", 0});
     samp::protocol::SetPlayerName rejected;
@@ -849,7 +833,7 @@ void TestGameTextRoundTrip() {
 }
 
 void TestEmptyGameTextIsRefused() {
-    // Every other string field accepts an empty value; this one does not.
+
     samp::net::BitStream stream;
     stream.Write<std::int32_t>(1);
     stream.Write<std::int32_t>(1000);
@@ -894,8 +878,7 @@ void TestSpawnInfoRoundTrip() {
 }
 
 void TestSpawnWeaponsAreNotInterleaved() {
-    // Weapons and ammunition are two separate runs. If they were read as pairs
-    // the first ammunition value would land in the second weapon slot.
+
     samp::protocol::SpawnInfo sent;
     sent.weapons = {1, 2, 3};
     sent.ammo = {10, 20, 30};
@@ -910,7 +893,7 @@ void TestSpawnWeaponsAreNotInterleaved() {
 }
 
 void TestWorldBoundsOrder() {
-    // Distinct values so a swapped pair cannot pass unnoticed.
+
     samp::net::BitStream stream;
     samp::protocol::WriteSetPlayerWorldBounds(stream, {1000.0f, -1000.0f, 500.0f, -500.0f});
     Check(stream.GetNumberOfBitsUsed() == 16 * 8, "world bounds are sixteen bytes");
@@ -962,7 +945,7 @@ void TestNumberPlateRoundTrip() {
 }
 
 void TestTrailerMessages() {
-    // The trailer is named first even though the towing vehicle holds the link.
+
     samp::net::BitStream attachStream;
     samp::protocol::WriteAttachTrailerToVehicle(attachStream, {17, 42});
 
@@ -1021,7 +1004,6 @@ void TestDeathMessageWithAndWithoutKiller() {
     Check(kill.victimId == 9 && kill.reason == 24, "victim and reason round-trip");
     Check(kill.IsValid(), "a message naming a victim is usable");
 
-    // Falling, drowning and the like arrive with no killer at all.
     samp::net::BitStream soloStream;
     samp::protocol::WriteDeathMessage(soloStream, {samp::protocol::kInvalidPlayerId, 9, 54});
 
@@ -1035,7 +1017,6 @@ void TestSelectTextDrawIsBitPacked() {
     samp::net::BitStream stream;
     samp::protocol::WriteSelectTextDraw(stream, {true, 0xFF0000FF});
 
-    // One bit for the flag plus a full colour: not a whole number of bytes.
     Check(stream.GetNumberOfBitsUsed() == 33, "textdraw selection is thirty-three bits");
 
     samp::protocol::SelectTextDraw selection;
@@ -1127,7 +1108,6 @@ void TestChatBubbleRoundTrip() {
     Check(bubble.expireTimeMs == 3000, "bubble lifetime round-trips");
     Check(bubble.text == "over here", "bubble text round-trips");
 
-    // The limit here is lower than every other text field in the protocol.
     samp::net::BitStream oversized;
     oversized.Write<std::uint16_t>(1);
     oversized.Write<std::uint32_t>(0);
@@ -1183,7 +1163,7 @@ void TestWorldPlayerAddRoundTrip() {
 }
 
 void TestTeamlessPlayerIsRecognised() {
-    // A teamless player is marked, not given team 255.
+
     samp::protocol::WorldPlayerAdd sent;
     sent.playerId = 1;
     sent.team = samp::protocol::kNoTeam;
@@ -1245,7 +1225,6 @@ void TestVehicleMarkersAreRecognised() {
     sent.modelId = samp::protocol::kMinVehicleModel;
     Check(sent.HasModelInRange(), "the first valid model is accepted");
 
-    // Defaults stand for "unset" rather than for real values.
     const samp::protocol::WorldVehicleAdd fresh;
     Check(!fresh.HasOwnColours(), "the default colours mean no override");
     Check(!fresh.HasPaintjob(), "a zero paint job means none");
@@ -1291,7 +1270,7 @@ void TestConnectionRejected() {
 }
 
 void TestScoreUpdateIsLengthDriven() {
-    // The message has no count field: entries run to the end of the packet.
+
     const std::vector<samp::protocol::ScoreEntry> sent = {{1, 100, 45}, {2, -50, 120}, {3, 0, 7}};
 
     samp::net::BitStream stream;
@@ -1309,7 +1288,7 @@ void TestScoreUpdateIsLengthDriven() {
 }
 
 void TestScoreUpdateIgnoresTrailingScrap() {
-    // A trailing partial entry cannot be parsed and must not be guessed at.
+
     samp::net::BitStream stream;
     samp::protocol::WriteScoreUpdate(stream, {{1, 10, 20}});
     stream.Write<std::uint16_t>(9);
@@ -1338,8 +1317,6 @@ void TestInitGameRoundTrip() {
     samp::net::BitStream stream;
     samp::protocol::WriteInitGame(stream, sent);
 
-    // Eleven single-bit flags means the message does not land on a byte
-    // boundary, which is exactly what a byte-oriented reader would get wrong.
     Check(stream.GetNumberOfBitsUsed() % 8 != 0, "the init packet is not byte-aligned");
 
     samp::protocol::InitGame received;
@@ -1358,7 +1335,7 @@ void TestInitGameRoundTrip() {
 }
 
 void TestInitGameFlagsAreSingleBits() {
-    // Setting one more flag must cost one bit, not one byte.
+
     samp::protocol::InitGame withoutFlag;
     samp::protocol::InitGame withFlag;
     withFlag.flag9 = true;
@@ -1435,7 +1412,6 @@ void TestActorAnimationRoundTrip() {
     samp::net::BitStream stream;
     samp::protocol::WriteApplyActorAnimation(stream, sent);
 
-    // Two length-prefixed strings, a float, four single bits and an int.
     const int expected = (2 + 1 + 3 + 1 + 9 + 4) * 8 + 4 + 32;
     Check(stream.GetNumberOfBitsUsed() == expected, "the four switches cost one bit each");
 
@@ -1481,7 +1457,7 @@ void TestAttachedObjectRoundTrip() {
 
     samp::net::BitStream stream;
     samp::protocol::WriteSetPlayerAttachedObject(stream, sent);
-    // Two bytes of id, four of slot, one bit, then the 52-byte description.
+
     Check(stream.GetNumberOfBitsUsed() == (2 + 4 + 52) * 8 + 1,
           "an attachment carries the full description");
 
@@ -1496,7 +1472,7 @@ void TestAttachedObjectRoundTrip() {
 }
 
 void TestClearingAttachmentIsShorter() {
-    // Clearing a slot omits the description entirely.
+
     samp::protocol::SetPlayerAttachedObject sent;
     sent.playerId = 6;
     sent.slot = 2;
@@ -1545,7 +1521,6 @@ void TestShopNameIsFixedWidth() {
     samp::net::BitStream stream;
     samp::protocol::WriteSetPlayerShopName(stream, {"Ammunation"});
 
-    // The field costs its full width no matter how short the name is.
     Check(stream.GetNumberOfBitsUsed() == static_cast<int>(samp::protocol::kShopNameSize) * 8,
           "a shop name always occupies thirty-two bytes");
 
@@ -1584,7 +1559,7 @@ void TestAudioStreamAndDrunkLevel() {
 }
 
 void TestEmptyBodiedMessage() {
-    // Cancelling an edit has no fields; its arrival is the whole instruction.
+
     samp::net::BitStream stream;
     samp::protocol::CancelEdit sent;
     samp::protocol::WriteCancelEdit(stream, sent);
@@ -1641,7 +1616,6 @@ void TestClientCheckRoundTrip() {
           "the request fields round-trip");
     Check(request.IsWithinBounds(), "a well-formed request passes its bounds check");
 
-    // The reply is a different shape under the same id.
     samp::net::BitStream replyStream;
     samp::protocol::WriteClientCheckResponse(replyStream, {sent.type, 0x500000, 1});
     Check(replyStream.GetNumberOfBitsUsed() == 6 * 8, "a check reply is six bytes");
@@ -1657,7 +1631,6 @@ void TestClientCheckBoundsAreChecked() {
     request.length = samp::protocol::kMinClientCheckLength;
     Check(request.IsWithinBounds(), "the extreme values that are allowed pass");
 
-    // A length of one is refused even though it looks harmless.
     request.length = 1;
     Check(!request.IsWithinBounds(), "a length below the minimum is refused");
 
@@ -1678,7 +1651,6 @@ void TestObjectControlMessages() {
     Check(samp::protocol::ReadSetObjectSpeed(speedStream, speed) && speed.speed.z == -0.5f,
           "object speed round-trips");
 
-    // Enabling collision names an object and nothing else.
     samp::net::BitStream collisionStream;
     samp::protocol::WriteSetObjectCollision(collisionStream, {700});
     Check(collisionStream.GetNumberOfBitsUsed() == 2 * 8,
@@ -1723,7 +1695,6 @@ void TestVehicleSeatingAndSkin() {
               seat.seatId == 2,
           "vehicle and seat round-trip");
 
-    // The skin message spends a full word on an id that never needs one.
     samp::net::BitStream skinStream;
     samp::protocol::WriteSetPlayerSkin(skinStream, {3, 287});
     Check(skinStream.GetNumberOfBitsUsed() == 8 * 8, "a skin change is eight bytes");
@@ -1774,7 +1745,6 @@ void TestClassAndSpawnResponses() {
     samp::net::BitStream stream;
     samp::protocol::WriteRequestClassResponse(stream, sent);
 
-    // One byte of verdict plus the spawn block that other messages also carry.
     Check(stream.GetNumberOfBitsUsed() ==
               static_cast<int>(1 + samp::protocol::kSpawnInfoSize) * 8,
           "a class response is a verdict plus a spawn block");
@@ -1822,7 +1792,7 @@ void TestSpecialActionDoorsAndStunts() {
 }
 
 void TestDiscardedBodyIsStillConsumed() {
-    // The client ignores the value but still reads it, so the field has to stay.
+
     samp::net::BitStream stream;
     samp::protocol::WriteEmptyPacket(stream, {0xBEEF});
     stream.Write<std::uint32_t>(0x12345678);
@@ -1861,7 +1831,7 @@ void TestObjectMovementMessages() {
           "the target rotation request round-trips");
 }
 
-}  // namespace
+}
 
 int main() {
     TestDiscardedBodyIsStillConsumed();

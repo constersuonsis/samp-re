@@ -52,6 +52,47 @@ void WriteDialogHeader(net::BitStream& stream, const DialogHeader& header) {
     WriteString8(stream, header.secondButton);
 }
 
+bool ReadDialogResponse(net::BitStream& stream, DialogResponse& response) {
+    response = DialogResponse{};
+
+    std::uint8_t button = 0;
+    std::uint8_t inputLength = 0;
+    if (!stream.Read(response.dialogId) || !stream.Read(button) ||
+        !stream.Read(response.listIndex) || !stream.Read(inputLength)) {
+        return false;
+    }
+    response.button = static_cast<DialogButton>(button);
+
+    if (inputLength == 0) {
+        return true;
+    }
+
+    std::vector<char> input(inputLength, '\0');
+    if (!stream.ReadBytes(input.data(), input.size())) {
+        return false;
+    }
+    response.hasInput = true;
+    response.inputText.assign(input.data(),
+                              input.back() == '\0' ? input.size() - 1 : input.size());
+    return true;
+}
+
+void WriteDialogResponse(net::BitStream& stream, const DialogResponse& response) {
+    stream.Write(response.dialogId);
+    stream.Write(static_cast<std::uint8_t>(response.button));
+    stream.Write(response.listIndex);
+
+    std::string input =
+        response.inputText.substr(0, response.hasInput ? kMaxDialogInputLength - 1 : 0);
+    const std::uint8_t inputLength =
+        response.hasInput ? static_cast<std::uint8_t>(input.size() + 1) : 0;
+    stream.Write(inputLength);
+    if (inputLength != 0) {
+        stream.WriteBytes(input.data(), input.size());
+        stream.WriteBytes("\0", 1);
+    }
+}
+
 bool ReadEnterVehicle(net::BitStream& stream, EnterVehicle& message) {
     message = EnterVehicle{};
 
@@ -104,7 +145,6 @@ bool ReadCreatePickup(net::BitStream& stream, CreatePickup& message) {
         return false;
     }
 
-    // A slot outside the pool would index past the end of the pickup array.
     if (!IsValidPickupSlot(message.slot)) {
         message = CreatePickup{};
         return false;
@@ -585,8 +625,6 @@ bool ReadSetPlayerShopName(net::BitStream& stream, SetPlayerShopName& message) {
         return false;
     }
 
-    // The field is always full width; the name is whatever precedes the first
-    // terminator, and a leading terminator means an empty name.
     const auto* end = static_cast<const char*>(std::memchr(buffer, '\0', sizeof(buffer)));
     message.name.assign(buffer, end != nullptr ? static_cast<std::size_t>(end - buffer)
                                                : sizeof(buffer));
@@ -1055,6 +1093,15 @@ void WriteWorldVehicleAdd(net::BitStream& stream, const WorldVehicleAdd& message
     stream.Write(message.modColour2);
 }
 
+bool ReadWorldVehicleRemove(net::BitStream& stream, WorldVehicleRemove& message) {
+    message = WorldVehicleRemove{};
+    return stream.Read(message.vehicleId);
+}
+
+void WriteWorldVehicleRemove(net::BitStream& stream, const WorldVehicleRemove& message) {
+    stream.Write(message.vehicleId);
+}
+
 bool ReadWorldPlayerDeath(net::BitStream& stream, WorldPlayerDeath& message) {
     message = WorldPlayerDeath{};
     return stream.Read(message.playerId);
@@ -1083,7 +1130,6 @@ bool ReadCreate3DTextLabel(net::BitStream& stream, Create3DTextLabel& message) {
         return false;
     }
 
-    // Label text shares the material text budget rather than the dialog one.
     return ReadCompressedText(stream, message.text, kMaxMaterialTextLength);
 }
 
@@ -1362,7 +1408,6 @@ bool ReadDisplayGameText(net::BitStream& stream, DisplayGameText& message) {
         return false;
     }
 
-    // A banner with nothing on it is refused rather than shown empty.
     if (length < 1 || length > kMaxGameTextLength) {
         return false;
     }
@@ -1387,9 +1432,6 @@ void WriteDisplayGameText(net::BitStream& stream, const DisplayGameText& message
 
 namespace {
 
-/// Reads a textdraw's text: a sixteen-bit length followed by that many bytes.
-/// `limit` differs by one between the two messages that use this, which is why
-/// it is passed in rather than assumed.
 bool ReadTextDrawText(net::BitStream& stream, std::string& text, std::uint16_t limit) {
     text.clear();
 
@@ -1416,7 +1458,7 @@ void WriteTextDrawText(net::BitStream& stream, std::string_view text, std::uint1
     stream.WriteBytes(text.data(), length);
 }
 
-}  // namespace
+}
 
 bool ReadTextDrawStyle(net::BitStream& stream, TextDrawStyle& style) {
     style = TextDrawStyle{};
@@ -1462,7 +1504,6 @@ bool ReadShowTextDraw(net::BitStream& stream, ShowTextDraw& message) {
         return false;
     }
 
-    // This message stops one short of the limit the update message allows.
     return ReadTextDrawText(stream, message.text, kMaxTextDrawTextLength - 1);
 }
 
@@ -1558,7 +1599,6 @@ bool ReadSetPlayerArmedWeapon(net::BitStream& stream, SetPlayerArmedWeapon& mess
         return false;
     }
 
-    // An unknown weapon would index past the end of the weapon tables.
     if (!IsValidWeaponId(message.weaponId)) {
         message = SetPlayerArmedWeapon{};
         return false;
@@ -1587,8 +1627,6 @@ bool ReadCompressedText(net::BitStream& stream, std::string& text, std::size_t m
         return false;
     }
 
-    // The run has to be present in full before decoding starts, otherwise the
-    // walk would end mid-symbol and leave the stream misaligned.
     if (stream.GetNumberOfUnreadBits() < bitCount) {
         return false;
     }
@@ -1604,8 +1642,6 @@ bool ReadCompressedText(net::BitStream& stream, std::string& text, std::size_t m
 void WriteCompressedText(net::BitStream& stream, std::string_view text) {
     const compression::HuffmanTree& tree = compression::HuffmanTree::Default();
 
-    // The length has to precede the payload, so the encoding happens into a
-    // scratch stream first and is copied over once its size is known.
     net::BitStream encoded;
     const int bitCount = tree.Encode(text.data(), text.size(), encoded);
 
@@ -1766,8 +1802,6 @@ bool ReadObjectMaterial(net::BitStream& stream, ObjectMaterial& material) {
         return true;
     }
 
-    // An unrecognised entry gives no way to know how long it is, so the rest of
-    // the list cannot be trusted.
     return false;
 }
 
@@ -1823,4 +1857,4 @@ bool ReadObjectMaterials(net::BitStream& stream, std::uint8_t count,
     return true;
 }
 
-}  // namespace samp::protocol
+}

@@ -27,8 +27,6 @@ void TestHealthNibble() {
     Check(DecodeHealthNibble(EncodeHealthNibble(0)) == 0, "zero health survives quantisation");
     Check(EncodeHealthNibble(150) == 0xF, "values above full clamp to the top code");
 
-    // Everything in between lands on a multiple of seven, and a player who is
-    // still alive must never quantise down to zero.
     for (int value = 1; value < 100; ++value) {
         const std::uint8_t decoded =
             DecodeHealthNibble(EncodeHealthNibble(static_cast<std::uint8_t>(value)));
@@ -56,7 +54,6 @@ void TestQuaternionRoundTrip() {
     Check(NearlyEqual(sent.y, received.y, 0.001f), "quaternion y round-trips");
     Check(NearlyEqual(sent.z, received.z, 0.001f), "quaternion z round-trips");
 
-    // Four sign bits plus three 16-bit components.
     Check(stream.GetNumberOfBitsUsed() == 4 + 48, "quaternion costs 52 bits");
 }
 
@@ -122,6 +119,77 @@ void TestVehicleSyncRoundTrip() {
     Check(NearlyEqual(received.velocity.y, 0.5f, 0.01f), "vehicle velocity round-trips");
 }
 
+void TestPlayerSyncRoundTrip() {
+    using samp::protocol::DecodeHealthNibble;
+    using samp::protocol::EncodeHealthNibble;
+
+    samp::protocol::OnFootSyncData sent{};
+    sent.leftRightKeys = 0x00FF;
+    sent.upDownKeys = 0xFF00;
+    sent.keys = 0x0A0B;
+    sent.position = {512.0f, -768.5f, 12.25f};
+    sent.rotation = {0.7071f, 0.0f, 0.7071f, 0.0f};
+    sent.health = 85;
+    sent.armour = 14;
+    sent.weaponId = 30;
+    sent.specialAction = 21;
+    sent.velocity = {0.1f, -0.2f, 0.3f};
+    sent.surfingVehicleId = 19;
+    sent.surfingOffset = {0.5f, 0.0f, -1.5f};
+    sent.animationId = 1189;
+    sent.animationFlags = 0x0100;
+
+    samp::net::BitStream stream;
+    samp::protocol::WritePlayerSync(stream, 8, sent);
+
+    std::uint16_t playerId = 0;
+    samp::protocol::OnFootSyncData received{};
+    Check(samp::protocol::ReadPlayerSync(stream, playerId, received), "player sync reads back");
+
+    Check(playerId == 8, "player id round-trips");
+    Check(received.keys == sent.keys, "keys round-trip");
+    Check(received.position.x == sent.position.x && received.position.y == sent.position.y &&
+              received.position.z == sent.position.z,
+          "position round-trips exactly");
+    Check(NearlyEqual(std::fabs(received.rotation.w), 0.7071f, 0.001f) &&
+              NearlyEqual(std::fabs(received.rotation.y), 0.7071f, 0.001f),
+          "rotation round-trips within quantisation");
+    Check(received.health == DecodeHealthNibble(EncodeHealthNibble(85)), "health round-trips");
+    Check(received.armour == DecodeHealthNibble(EncodeHealthNibble(14)), "armour round-trips");
+    Check(received.weaponId == 30, "weapon id round-trips");
+    Check(received.specialAction == 21, "special action round-trips");
+    Check(NearlyEqual(received.velocity.x, 0.1f, 0.01f) &&
+              NearlyEqual(received.velocity.y, -0.2f, 0.01f),
+          "velocity round-trips");
+    Check(received.surfingVehicleId == 19, "surf target round-trips");
+    Check(NearlyEqual(received.surfingOffset.x, 0.5f, 0.0001f), "surf offset round-trips");
+    Check(received.animationId == 1189 && received.animationFlags == 0x0100,
+          "animation state round-trips");
+}
+
+void TestPlayerSyncAbsentFieldsFallBackToDefaults() {
+    samp::protocol::OnFootSyncData sent{};
+    sent.keys = 0x0004;
+    sent.position = {0.0f, 0.0f, 3.0f};
+    sent.rotation = {1.0f, 0.0f, 0.0f, 0.0f};
+
+    samp::net::BitStream stream;
+    samp::protocol::WritePlayerSync(stream, 21, sent);
+
+    std::uint16_t playerId = 0;
+    samp::protocol::OnFootSyncData received{};
+    Check(samp::protocol::ReadPlayerSync(stream, playerId, received),
+          "a minimal player sync reads back");
+
+    Check(playerId == 21, "player id round-trips on the minimal form");
+    Check(received.leftRightKeys == 0 && received.upDownKeys == 0,
+          "absent key groups read back as zeroes");
+    Check(received.health == 0 && received.armour == 0, "zero health codes stay zero");
+    Check(received.surfingVehicleId == 0xFFFF, "no surf target reads back as none");
+    Check(received.animationId == 0 && received.animationFlags == 0,
+          "absent animation reads back as none");
+}
+
 void TestTruncatedPacketIsRejected() {
     samp::net::BitStream stream;
     stream.Write<std::uint16_t>(1);
@@ -133,7 +201,7 @@ void TestTruncatedPacketIsRejected() {
           "a truncated packet is rejected instead of reading garbage");
 }
 
-}  // namespace
+}
 
 int main() {
     TestHealthNibble();
@@ -141,6 +209,8 @@ int main() {
     TestVelocityRoundTrip();
     TestStandingStillSkipsDirection();
     TestVehicleSyncRoundTrip();
+    TestPlayerSyncRoundTrip();
+    TestPlayerSyncAbsentFieldsFallBackToDefaults();
     TestTruncatedPacketIsRejected();
 
     if (g_failures == 0) {

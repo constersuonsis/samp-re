@@ -58,8 +58,6 @@ void TestPartialBlockIsRefused() {
     std::vector<std::uint8_t> payload(12, 0xAB);
     const std::vector<std::uint8_t> original = payload;
 
-    // Twelve bytes is a block and a half; processing it would read past the end
-    // of the last block.
     Check(!cipher.Encrypt(payload.data(), payload.size()), "a partial block is refused");
     Check(payload == original, "a refused buffer is left untouched");
 }
@@ -89,7 +87,6 @@ void TestChecksumIsRepeatable() {
     samp::crypto::PacketChecksum first;
     first.Update("packet body", 11);
 
-    // Feeding the same bytes in different chunk sizes must not change anything.
     samp::crypto::PacketChecksum chunked;
     chunked.Update("packet", 6);
     chunked.Update(" body", 5);
@@ -118,7 +115,7 @@ void TestChecksumDetectsSingleBitFlip() {
 }
 
 samp::crypto::PacketCodec MakeCodec() {
-    // A fixed filler keeps the framing reproducible.
+
     return samp::crypto::PacketCodec(samp::crypto::XteaCipher(kKey, kDelta),
                                      [] { return static_cast<std::uint8_t>(0x5A); });
 }
@@ -166,8 +163,6 @@ void TestTamperedPacketIsRejected() {
     std::vector<std::uint8_t> packet;
     Check(codec.Encode(body.data(), body.size(), packet), "a packet encodes");
 
-    // Flip a bit in the ciphertext: decryption garbles a whole block, which the
-    // checksum then catches.
     packet[packet.size() / 2] ^= 0x01;
 
     std::vector<std::uint8_t> decoded;
@@ -185,8 +180,7 @@ void TestMisalignedPacketIsRejected() {
 }
 
 void TestPaddingIsHiddenInTheByte() {
-    // The padding length occupies the low nibble only; the high nibble is
-    // filler and must not be mistaken for part of the count.
+
     const samp::crypto::PacketCodec codec = MakeCodec();
     const std::vector<std::uint8_t> body(3, 0x11);
 
@@ -198,7 +192,7 @@ void TestPaddingIsHiddenInTheByte() {
     Check(decoded == body, "filler in the high nibble does not disturb the payload");
 }
 
-}  // namespace
+}
 
 int main() {
     TestPacketRoundTrip();

@@ -4,13 +4,6 @@
 
 namespace samp::compression {
 
-/// Character frequencies the default text tree is built from.
-///
-/// These are letter counts taken from a sample of English prose, and they
-/// are baked into both ends of the connection: the numbers themselves never
-/// travel, only the tree shape they produce. Changing any entry changes every
-/// code and breaks compatibility, so the table is reproduced exactly.
-/// Bytes above the ASCII range score zero and fall back to the weight floor.
 inline constexpr HuffmanTree::FrequencyTable kDefaultTextFrequencies = {
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 722, 0, 0, 2, 0, 0,
@@ -46,4 +39,4 @@ inline constexpr HuffmanTree::FrequencyTable kDefaultTextFrequencies = {
     0, 0, 0, 0, 0, 0, 0, 0,
 };
 
-}  // namespace samp::compression
+}

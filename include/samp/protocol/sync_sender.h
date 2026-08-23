@@ -9,15 +9,6 @@
 
 namespace samp::protocol {
 
-/// Builds an outgoing sync packet, if one is due.
-///
-/// Every outgoing sync kind shares the same shape: a single id byte followed by
-/// the payload copied out verbatim. Nothing is quantised or bit-packed on the
-/// way out — that only happens when the server relays the data on — so one
-/// builder serves all of them.
-///
-/// Returns false when the throttle decided the payload was not worth sending,
-/// in which case `packet` is left untouched.
 template <typename Sync>
 bool BuildSyncPacket(SyncThrottle& throttle, PacketId id, const Sync& sync, std::uint32_t nowMs,
                      net::BitStream& packet) {
@@ -33,4 +24,4 @@ bool BuildSyncPacket(SyncThrottle& throttle, PacketId id, const Sync& sync, std:
     return true;
 }
 
-}  // namespace samp::protocol
+}

@@ -100,7 +100,7 @@ void TestPacketIdsAreDistinct() {
     }
 }
 
-}  // namespace
+}
 
 int main() {
     TestBitfieldPacking();

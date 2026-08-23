@@ -52,7 +52,6 @@ void TestVerticalLimitDependsOnVehicleType() {
     const samp::Vector3 origin{0.0f, 0.0f, 0.0f};
     const samp::Vector3 above{0.0f, 0.0f, 1.0f};
 
-    // One metre up is past the ordinary limit but inside the larger one.
     const auto ordinary =
         InterpolateTowards(origin, above, kStill, samp::protocol::SnapDistanceZFor(0));
     Check(ordinary.action == InterpolationAction::Snap,
@@ -79,7 +78,7 @@ void TestVehicleTypeBoundaries() {
 }
 
 void TestExistingVelocityIsKept() {
-    // The correction is added to whatever the vehicle is already doing.
+
     const samp::Vector3 moving{2.0f, 0.0f, 0.0f};
     const auto result = InterpolateTowards({0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, moving,
                                            samp::protocol::kSnapDistanceZ);
@@ -90,7 +89,7 @@ void TestExistingVelocityIsKept() {
 }
 
 void TestNegligibleResultIsSkipped() {
-    // A correction that cancels the current velocity leaves nothing to apply.
+
     const float gap = 0.1f;
     const samp::Vector3 opposing{-gap * samp::protocol::kBlendFactor, 0.0f, 0.0f};
 
@@ -101,14 +100,14 @@ void TestNegligibleResultIsSkipped() {
 }
 
 void TestSnapWinsOverDeadZoneOnOtherAxes() {
-    // One axis far out is enough, even with the others already in place.
+
     const auto result = InterpolateTowards({0.0f, 0.0f, 0.0f}, {0.0f, 20.0f, 0.0f}, kStill,
                                            samp::protocol::kSnapDistanceZ);
     Check(result.action == InterpolationAction::Snap,
           "a single distant axis snaps the whole vehicle");
 }
 
-}  // namespace
+}
 
 int main() {
     TestAlreadyInPlaceDoesNothing();

@@ -8,12 +8,9 @@
 namespace samp::compression {
 
 HuffmanTree::HuffmanTree(const FrequencyTable& frequencies) {
-    // Every merge adds one node, so the final tree holds 2 * 256 - 1 of them.
+
     nodes_.reserve(kSymbolCount * 2 - 1);
 
-    // The queue stays sorted by ascending weight. Equal weights are ordered so
-    // that the newest entry comes first, which is what decides the shape of the
-    // tree whenever weights tie.
     std::list<int> queue;
 
     const auto insert = [&](int index) {
@@ -64,8 +61,6 @@ void HuffmanTree::BuildCodeTable() {
         std::vector<bool>& code = codes_[symbol];
         code.clear();
 
-        // Codes are discovered walking up from the leaf, so the bits come out
-        // reversed and have to be flipped before use.
         for (int node = static_cast<int>(symbol); node != root_;) {
             const int parent = nodes_[node].parent;
             code.push_back(nodes_[parent].left != node);
@@ -131,8 +126,6 @@ bool CompressBlock(const void* input, std::size_t size, net::BitStream& out) {
         out.WriteCompressed(frequency);
     }
 
-    // The encoded run starts on a byte boundary so the length that precedes it
-    // can be rewritten in place afterwards.
     out.AlignWriteToByteBoundary();
 
     const int lengthOffset = out.GetNumberOfBitsUsed();
@@ -175,8 +168,6 @@ bool DecompressBlock(net::BitStream& in, std::vector<std::uint8_t>& out, std::si
     out.assign(size, 0);
     const std::size_t produced = tree.Decode(in, static_cast<int>(bitCount), out.data(), size);
 
-    // A run that decodes to a different length than the header promised means
-    // the block is corrupt, whatever the bits happened to spell.
     if (produced != size) {
         out.clear();
         return false;
@@ -189,4 +180,4 @@ const HuffmanTree& HuffmanTree::Default() {
     return tree;
 }
 
-}  // namespace samp::compression
+}

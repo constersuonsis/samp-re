@@ -28,4 +28,4 @@ void RpcDispatcher::Clear() {
     handlers_.clear();
 }
 
-}  // namespace samp::protocol
+}

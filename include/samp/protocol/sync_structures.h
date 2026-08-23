@@ -7,11 +7,11 @@
 
 namespace samp::protocol {
 
-/// Packet identifiers carried as the first byte of a sync payload.
 enum class PacketId : std::uint8_t {
-    /// Marks a packet that carries a 32-bit send time ahead of the real id.
+
     Timestamp = 0x28,
 
+    VehicleSync = 0xC8,
     AimSync = 0xCB,
     BulletSync = 0xCE,
     PlayerSync = 0xCF,
@@ -22,11 +22,6 @@ enum class PacketId : std::uint8_t {
 
 #pragma pack(push, 1)
 
-/// Payload of an on-foot sync packet, sent unmodified as a block of bytes.
-///
-/// The client only puts this on the wire when a field actually changed or half
-/// a second has passed since the last send, so the layout has to stay
-/// byte-exact for the comparison against the previous frame to work.
 struct OnFootSyncData {
     std::uint16_t leftRightKeys;
     std::uint16_t upDownKeys;
@@ -38,8 +33,6 @@ struct OnFootSyncData {
     std::uint8_t health;
     std::uint8_t armour;
 
-    /// Weapon occupies the low six bits; the top two carry the extra key state
-    /// that did not fit into `keys`.
     std::uint8_t weaponId : 6;
     std::uint8_t additionalKey : 2;
 
@@ -47,8 +40,6 @@ struct OnFootSyncData {
 
     Vector3 velocity;
 
-    /// Position relative to the vehicle or object the player is standing on.
-    /// Zeroed when not surfing.
     Vector3 surfingOffset;
     std::uint16_t surfingVehicleId;
 
@@ -56,7 +47,6 @@ struct OnFootSyncData {
     std::uint16_t animationFlags;
 };
 
-/// Payload of an aim sync packet: where the camera is and what it looks at.
 struct AimSyncData {
     std::uint8_t cameraMode;
     Vector3 cameraFront;
@@ -69,15 +59,13 @@ struct AimSyncData {
     std::uint8_t cameraZoom;
 };
 
-/// Payload of a passenger sync packet, sent while riding as a non-driver.
 struct PassengerSyncData {
     std::uint16_t vehicleId;
 
     std::uint8_t seatId : 6;
-    /// While this is set the client also raises its aim sync rate from one
-    /// second to a tenth of a second.
+
     std::uint8_t aiming : 1;
-    /// Set while leaning out of the window with a weapon drawn.
+
     std::uint8_t driveBy : 1;
 
     std::uint8_t weaponId : 6;
@@ -93,7 +81,6 @@ struct PassengerSyncData {
     Vector3 position;
 };
 
-/// Payload of a trailer sync packet, sent by whoever tows the trailer.
 struct TrailerSyncData {
     std::uint16_t trailerId;
     Vector3 position;
@@ -102,13 +89,10 @@ struct TrailerSyncData {
     Vector3 turnVelocity;
 };
 
-/// Payload of an unoccupied vehicle sync packet, sent by the player the server
-/// made responsible for a driverless vehicle.
 struct UnoccupiedSyncData {
     std::uint16_t vehicleId;
     std::uint8_t seatId;
 
-    /// First and second rows of the vehicle matrix; the third is derived.
     Vector3 roll;
     Vector3 direction;
 
@@ -118,7 +102,6 @@ struct UnoccupiedSyncData {
     float vehicleHealth;
 };
 
-/// What a bullet hit, reported alongside the shot itself.
 enum class BulletHitType : std::uint8_t {
     None = 0,
     Player = 1,
@@ -126,25 +109,18 @@ enum class BulletHitType : std::uint8_t {
     Object = 3,
 };
 
-/// Payload of a bullet sync packet.
 struct BulletSyncData {
     std::uint8_t hitType;
     std::uint16_t hitId;
 
     Vector3 origin;
     Vector3 target;
-    /// Impact point, relative to the entity that was hit when there was one.
+
     Vector3 centreOfHit;
 
     std::uint8_t weaponId;
 };
 
-/// Decoded state of a player driving a vehicle.
-///
-/// Unlike the on-foot payload this never travels as a raw block of bytes: the
-/// wire form is bit-packed and several fields are quantised, so it always goes
-/// through the codec in sync_codec.h. The layout still has to stay exact
-/// because the rest of the client reads it by offset.
 struct VehicleSyncData {
     std::uint16_t vehicleId;
 
@@ -158,8 +134,6 @@ struct VehicleSyncData {
 
     float vehicleHealth;
 
-    /// Both values are quantised to a nibble on the wire, so they come back in
-    /// steps of seven with 100 as a special case.
     std::uint8_t playerHealth;
     std::uint8_t armour;
 
@@ -231,7 +205,6 @@ static_assert(offsetof(VehicleSyncData, landingGearState) == 56, "landing gear f
 static_assert(offsetof(VehicleSyncData, trailerId) == 57, "trailer field offset");
 static_assert(offsetof(VehicleSyncData, trainSpeed) == 59, "train speed field offset");
 
-/// The client resends an unchanged sync packet once this much time has passed.
 inline constexpr std::uint32_t kSyncResendIntervalMs = 500;
 
-}  // namespace samp::protocol
+}

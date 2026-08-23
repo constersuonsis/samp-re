@@ -20,7 +20,7 @@ bool ReadBody(net::BitStream& stream, std::string& value, std::size_t length) {
     return true;
 }
 
-}  // namespace
+}
 
 bool ReadString8(net::BitStream& stream, std::string& value) {
     std::uint8_t length = 0;
@@ -44,8 +44,6 @@ bool ReadString32(net::BitStream& stream, std::string& value, std::size_t maxLen
         return false;
     }
 
-    // A four-byte length is still bounded: an oversized value means a malformed
-    // or hostile packet, not a long string.
     if (length > maxLength) {
         value.clear();
         return false;
@@ -60,4 +58,4 @@ void WriteString32(net::BitStream& stream, std::string_view value) {
     stream.WriteBytes(value.data(), length);
 }
 
-}  // namespace samp::protocol
+}

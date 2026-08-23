@@ -6,17 +6,12 @@
 namespace samp::protocol {
 namespace {
 
-/// A quaternion component is mapped onto the full 16-bit range.
 constexpr float kQuaternionScale = 1.0f / 65535.0f;
 
-/// A direction component covers [-1, 1] across the same range.
 constexpr float kDirectionScale = 2.0f / 65535.0f;
 
-/// Below this length a velocity is treated as standing still and its direction
-/// is not sent at all.
 constexpr float kVelocityEpsilon = 0.00001f;
 
-/// Health steps up in this many points per nibble code.
 constexpr int kHealthStep = 7;
 constexpr std::uint8_t kFullHealthCode = 0xF;
 
@@ -26,7 +21,7 @@ std::uint16_t QuantiseUnitComponent(float value, float scale) {
     return static_cast<std::uint16_t>(clamped + 0.5f);
 }
 
-}  // namespace
+}
 
 std::uint8_t EncodeHealthNibble(std::uint8_t value) {
     if (value >= 100) {
@@ -35,9 +30,7 @@ std::uint8_t EncodeHealthNibble(std::uint8_t value) {
     if (value == 0) {
         return 0;
     }
-    // Code zero is reserved for "dead", so anything below one full step is
-    // rounded up rather than down: a player on their last few points must not
-    // arrive on the other side reading as zero.
+
     const int code = value / kHealthStep;
     return static_cast<std::uint8_t>(std::clamp(code, 1, kFullHealthCode - 1));
 }
@@ -58,7 +51,6 @@ void WriteCompressedQuaternion(net::BitStream& stream, const Quaternion& rotatio
     stream.WriteBit(rotation.y < 0.0f);
     stream.WriteBit(rotation.z < 0.0f);
 
-    // Only the magnitudes travel; w is rebuilt from the unit-length constraint.
     stream.Write(QuantiseUnitComponent(std::fabs(rotation.x), kQuaternionScale));
     stream.Write(QuantiseUnitComponent(std::fabs(rotation.y), kQuaternionScale));
     stream.Write(QuantiseUnitComponent(std::fabs(rotation.z), kQuaternionScale));
@@ -113,7 +105,6 @@ void WriteCompressedVelocity(net::BitStream& stream, const Vector3& velocity) {
         return;
     }
 
-    // The direction is normalised first so each component fits [-1, 1].
     const Vector3 direction{velocity.x / magnitude, velocity.y / magnitude, velocity.z / magnitude};
     stream.Write(QuantiseUnitComponent(direction.x + 1.0f, kDirectionScale));
     stream.Write(QuantiseUnitComponent(direction.y + 1.0f, kDirectionScale));
@@ -166,8 +157,6 @@ void WriteVehicleSync(net::BitStream& stream, std::uint16_t playerId, const Vehi
     stream.WriteBit(sync.sirenState != 0);
     stream.WriteBit(sync.landingGearState != 0);
 
-    // Train speed and trailer are optional and, unlike in the decoded state,
-    // the speed comes first on the wire.
     const bool hasTrainSpeed = sync.trainSpeed != 0.0f;
     stream.WriteBit(hasTrainSpeed);
     if (hasTrainSpeed) {
@@ -247,4 +236,130 @@ bool ReadVehicleSync(net::BitStream& stream, std::uint16_t& playerId, VehicleSyn
     return true;
 }
 
-}  // namespace samp::protocol
+bool ReadPlayerSync(net::BitStream& stream, std::uint16_t& playerId, OnFootSyncData& sync) {
+    sync = OnFootSyncData{};
+    sync.surfingVehicleId = 0xFFFF;
+
+    if (!stream.Read(playerId)) {
+        return false;
+    }
+
+    bool present = false;
+    if (!stream.ReadBit(present)) {
+        return false;
+    }
+    if (present && !stream.Read(sync.leftRightKeys)) {
+        return false;
+    }
+
+    if (!stream.ReadBit(present)) {
+        return false;
+    }
+    if (present && !stream.Read(sync.upDownKeys)) {
+        return false;
+    }
+
+    if (!stream.Read(sync.keys) || !stream.ReadBytes(&sync.position, sizeof(sync.position))) {
+        return false;
+    }
+
+    if (!ReadCompressedQuaternion(stream, sync.rotation)) {
+        return false;
+    }
+
+    std::uint8_t packedHealth = 0;
+    if (!stream.Read(packedHealth)) {
+        return false;
+    }
+    sync.health = DecodeHealthNibble(static_cast<std::uint8_t>(packedHealth >> 4));
+    sync.armour = DecodeHealthNibble(static_cast<std::uint8_t>(packedHealth & 0x0F));
+
+    std::uint8_t weapon = 0;
+    if (!stream.Read(weapon)) {
+        return false;
+    }
+    sync.weaponId = static_cast<std::uint8_t>(weapon & 0x3F);
+
+    if (!stream.Read(sync.specialAction)) {
+        return false;
+    }
+
+    if (!ReadCompressedVelocity(stream, sync.velocity)) {
+        return false;
+    }
+
+    if (!stream.ReadBit(present)) {
+        return false;
+    }
+    if (present) {
+        if (!stream.Read(sync.surfingVehicleId) ||
+            !stream.ReadBytes(&sync.surfingOffset, sizeof(sync.surfingOffset))) {
+            return false;
+        }
+    }
+
+    if (!stream.ReadBit(present)) {
+        return false;
+    }
+    if (present && !stream.ReadBytes(&sync.animationId, sizeof(sync.animationId) + sizeof(sync.animationFlags))) {
+        return false;
+    }
+
+    return true;
+}
+
+void WritePlayerSync(net::BitStream& stream, std::uint16_t playerId, const OnFootSyncData& sync) {
+    stream.Write(playerId);
+
+    const bool hasLeftRightKeys = sync.leftRightKeys != 0;
+    stream.WriteBit(hasLeftRightKeys);
+    if (hasLeftRightKeys) {
+        stream.Write(sync.leftRightKeys);
+    }
+
+    const bool hasUpDownKeys = sync.upDownKeys != 0;
+    stream.WriteBit(hasUpDownKeys);
+    if (hasUpDownKeys) {
+        stream.Write(sync.upDownKeys);
+    }
+
+    stream.Write(sync.keys);
+    stream.WriteBytes(&sync.position, sizeof(sync.position));
+    WriteCompressedQuaternion(stream, sync.rotation);
+
+    const std::uint8_t packedHealth =
+        static_cast<std::uint8_t>((EncodeHealthNibble(sync.health) << 4) |
+                                  EncodeHealthNibble(sync.armour));
+    stream.Write(packedHealth);
+    stream.Write(static_cast<std::uint8_t>(sync.weaponId));
+    stream.Write(sync.specialAction);
+    WriteCompressedVelocity(stream, sync.velocity);
+
+    const bool hasSurfing = sync.surfingVehicleId != 0 && sync.surfingVehicleId != 0xFFFF;
+    stream.WriteBit(hasSurfing);
+    if (hasSurfing) {
+        stream.Write(sync.surfingVehicleId);
+        stream.WriteBytes(&sync.surfingOffset, sizeof(sync.surfingOffset));
+    }
+
+    const bool hasAnimation =
+        sync.animationId != 0 || sync.animationFlags != 0;
+    stream.WriteBit(hasAnimation);
+    if (hasAnimation) {
+        stream.WriteBytes(&sync.animationId,
+                          sizeof(sync.animationId) + sizeof(sync.animationFlags));
+    }
+}
+
+bool ReadRelayedSync(net::BitStream& stream, std::uint16_t& playerId, void* data,
+                     std::size_t size) {
+    return stream.Read(playerId) && stream.ReadBytes(data, size);
+}
+
+void WriteRelayedSync(net::BitStream& stream, std::uint16_t playerId, const void* data,
+                      std::size_t size) {
+    stream.Write(playerId);
+    stream.WriteBytes(data, size);
+}
+
+}

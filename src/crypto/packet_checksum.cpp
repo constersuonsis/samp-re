@@ -25,4 +25,4 @@ void PacketChecksum::Reset() {
     total_ = 0;
 }
 
-}  // namespace samp::crypto
+}

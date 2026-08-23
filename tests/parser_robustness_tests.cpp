@@ -20,7 +20,6 @@ void Check(bool condition, const std::string& what) {
     }
 }
 
-/// A reader reduced to "consume this stream and say whether it parsed".
 struct Parser {
     const char* name;
     std::function<bool(samp::net::BitStream&)> parse;
@@ -34,7 +33,6 @@ Parser Wrap(const char* name, bool (*read)(samp::net::BitStream&, Message&)) {
             }};
 }
 
-/// Every reader that takes a stream and one out parameter.
 std::vector<Parser> AllParsers() {
     using namespace samp::protocol;
     return {
@@ -91,7 +89,6 @@ std::vector<Parser> AllParsers() {
     };
 }
 
-/// A reader must never claim success while having read past the end.
 bool ParsedWithinBounds(const Parser& parser, const std::vector<std::uint8_t>& bytes) {
     samp::net::BitStream stream(bytes.data(), bytes.size(), false);
 
@@ -103,8 +100,7 @@ bool ParsedWithinBounds(const Parser& parser, const std::vector<std::uint8_t>& b
 }
 
 void TestTruncatedInputIsSafe() {
-    // Feed every reader every prefix length of a plausible packet. Each has to
-    // either refuse or stay inside the buffer; neither may it read past the end.
+
     std::vector<std::uint8_t> full(96);
     for (std::size_t i = 0; i < full.size(); ++i) {
         full[i] = static_cast<std::uint8_t>(i * 3 + 1);
@@ -124,7 +120,7 @@ void TestTruncatedInputIsSafe() {
 }
 
 void TestRandomInputIsSafe() {
-    // Deterministic seed: a failure has to be reproducible.
+
     std::mt19937 generator(20240117);
     std::uniform_int_distribution<int> byteValue(0, 255);
     std::uniform_int_distribution<std::size_t> lengthValue(0, 160);
@@ -148,8 +144,7 @@ void TestRandomInputIsSafe() {
 }
 
 void TestEmptyInputIsRefused() {
-    // Nothing at all must not be mistaken for a valid message. The readers that
-    // legitimately accept an empty body are not in this table.
+
     const std::vector<std::uint8_t> nothing;
 
     for (const Parser& parser : AllParsers()) {
@@ -160,7 +155,7 @@ void TestEmptyInputIsRefused() {
     }
 }
 
-}  // namespace
+}
 
 int main() {
     TestTruncatedInputIsSafe();

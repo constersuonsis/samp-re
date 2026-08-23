@@ -8,7 +8,6 @@
 namespace samp::crypto {
 namespace {
 
-/// Low nibble of the padding byte; the high nibble is filler.
 constexpr std::uint8_t kPaddingMask = 0x0F;
 
 std::size_t PaddingFor(std::size_t framedSize) {
@@ -16,7 +15,7 @@ std::size_t PaddingFor(std::size_t framedSize) {
     return remainder == 0 ? 0 : XteaCipher::kBlockSize - remainder;
 }
 
-}  // namespace
+}
 
 PacketCodec::PacketCodec(XteaCipher cipher, RandomByteSource randomByte)
     : cipher_(std::move(cipher)), randomByte_(std::move(randomByte)) {}
@@ -33,8 +32,6 @@ bool PacketCodec::Encode(const void* payload, std::size_t size,
 
     packet.assign(framed + padding, 0);
 
-    // The padding length shares a byte with filler so that a short packet does
-    // not advertise its shape in the clear.
     packet[1] = static_cast<std::uint8_t>(padding | (randomByte_() << 4));
     for (std::size_t i = 0; i < padding; ++i) {
         packet[kHeaderSize + i] = randomByte_();
@@ -44,7 +41,6 @@ bool PacketCodec::Encode(const void* payload, std::size_t size,
         std::memcpy(packet.data() + kHeaderSize + padding, payload, size);
     }
 
-    // Everything except the checksum byte itself is covered.
     PacketChecksum checksum;
     checksum.Update(packet.data() + 1, packet.size() - 1);
     packet[0] = checksum.Value();
@@ -81,4 +77,4 @@ bool PacketCodec::Decode(const void* packet, std::size_t size,
     return true;
 }
 
-}  // namespace samp::crypto
+}

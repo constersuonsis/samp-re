@@ -6,11 +6,6 @@
 
 namespace samp::net {
 
-/// Bit-level serializer behind every packet and RPC in the client protocol.
-///
-/// Streams start out using an internal buffer and only move to the heap once
-/// they outgrow it, which keeps the common case (small sync packets built and
-/// discarded every frame) free of allocations.
 class BitStream {
 public:
     static constexpr std::size_t kStackCapacityBytes = 256;
@@ -18,12 +13,8 @@ public:
 
     BitStream();
 
-    /// Pre-sizes the stream for `initialBytes` of payload.
     explicit BitStream(std::size_t initialBytes);
 
-    /// Wraps an existing buffer. With `copyData` set the bytes are copied into
-    /// the stream; otherwise the stream borrows them and the caller must keep
-    /// the buffer alive for as long as the stream is used.
     BitStream(const void* data, std::size_t sizeInBytes, bool copyData);
 
     ~BitStream();
@@ -31,26 +22,14 @@ public:
     BitStream(const BitStream&) = delete;
     BitStream& operator=(const BitStream&) = delete;
 
-    // --- Writing -----------------------------------------------------------
-
     void WriteBit(bool value);
 
-    /// Writes `bitCount` bits from `input`. When the count is not a multiple of
-    /// eight, `rightAlignBits` selects whether the trailing partial byte is
-    /// taken from its low bits (true) or its high bits (false).
     void WriteBits(const void* input, int bitCount, bool rightAlignBits = true);
 
-    /// Appends raw bytes at the current bit position, without padding. Pairs
-    /// with ReadBytes().
     void WriteBytes(const void* input, std::size_t byteCount);
 
-    /// Pads to the next byte boundary first, so the payload can be memcpy'd
-    /// straight out again. Pairs with ReadAlignedBytes().
     void WriteAlignedBytes(const void* input, std::size_t byteCount);
 
-    /// Drops leading bytes that carry no information: 0x00 runs for unsigned
-    /// values, 0xFF runs for negative ones. The final byte is sent as a nibble
-    /// when its upper half is redundant too.
     void WriteCompressedBits(const void* input, int bitCount, bool unsignedData);
 
     template <typename T>
@@ -65,10 +44,6 @@ public:
         WriteCompressedBits(&value, sizeof(T) * 8, std::is_unsigned_v<T>);
     }
 
-    // --- Reading -----------------------------------------------------------
-
-    /// Reads one bit without bounds checking. Use the `bool&` overload when the
-    /// data comes off the wire.
     bool ReadBit();
     bool ReadBit(bool& value);
 
@@ -89,9 +64,6 @@ public:
         return ReadCompressedBits(&value, sizeof(T) * 8, std::is_unsigned_v<T>);
     }
 
-    // --- Position and state ------------------------------------------------
-
-    /// Empties the stream so it can be reused for another packet.
     void Reset();
     void ResetReadPointer();
 
@@ -112,15 +84,10 @@ public:
     unsigned char* GetData() { return data_; }
     const unsigned char* GetData() const { return data_; }
 
-    /// Points the stream at an externally owned buffer. Ownership stays with
-    /// the caller; the stream will not free it.
     void SetData(unsigned char* data);
 
-    /// Copies the used portion into a newly allocated buffer and returns its
-    /// size in bits. The caller takes ownership via `delete[]`.
     int CopyData(unsigned char** output) const;
 
-    /// Appends `bitCount` bits taken from `source`, advancing its read pointer.
     void CopyBitsFrom(BitStream& source, int bitCount);
 
     static std::size_t BitsToBytes(int bitCount) {
@@ -128,7 +95,7 @@ public:
     }
 
 private:
-    /// Grows the buffer so that `bitCount` more bits fit.
+
     void AddBitsAndReallocate(int bitCount);
 
     bool OwnsHeapBuffer() const { return copyData_ && data_ != stackData_; }
@@ -141,4 +108,4 @@ private:
     unsigned char stackData_[kStackCapacityBytes];
 };
 
-}  // namespace samp::net
+}

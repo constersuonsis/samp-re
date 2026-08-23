@@ -37,8 +37,6 @@ InterpolationResult InterpolateTowards(const Vector3& current, const Vector3& ta
         result.velocity.z += deltaZ * kBlendFactor;
     }
 
-    // The test is on the resulting velocity, not on the correction, so a
-    // vehicle already moving keeps its momentum applied.
     if (std::fabs(result.velocity.x) > kVelocityDeadZone ||
         std::fabs(result.velocity.y) > kVelocityDeadZone ||
         std::fabs(result.velocity.z) > kVelocityDeadZone) {
@@ -48,4 +46,4 @@ InterpolationResult InterpolateTowards(const Vector3& current, const Vector3& ta
     return result;
 }
 
-}  // namespace samp::protocol
+}

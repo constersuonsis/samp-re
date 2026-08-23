@@ -54,7 +54,7 @@ void TestTypedRoundTrip() {
 }
 
 void TestUnalignedWrites() {
-    // A single bit in front of a byte payload forces the shifting path.
+
     samp::net::BitStream stream;
     stream.WriteBit(true);
     stream.Write<std::uint32_t>(0x11223344);
@@ -86,15 +86,13 @@ void TestCompressed() {
     Check(stream.ReadCompressed(large) && large == 0xDEADBEEF, "large compressed value round-trips");
     Check(stream.ReadCompressed(negative) && negative == -2, "negative compressed value round-trips");
 
-    // A value that fits in a nibble must cost far less than the full 32 bits.
     samp::net::BitStream compact;
     compact.WriteCompressed<std::uint32_t>(5);
     Check(compact.GetNumberOfBitsUsed() < 32, "compression actually shrinks small values");
 }
 
 void TestUnalignedBytes() {
-    // WriteBytes packs straight against the preceding bit; ReadBytes must
-    // unpack it the same way instead of skipping to the next byte.
+
     const char payload[] = "sync";
     samp::net::BitStream stream;
     stream.WriteBit(true);
@@ -125,7 +123,7 @@ void TestAlignedBytes() {
 }
 
 void TestHeapGrowth() {
-    // Push well past the internal buffer so the stream has to move to the heap.
+
     samp::net::BitStream stream;
     const int count = 4096;
     for (int i = 0; i < count; ++i) {
@@ -152,7 +150,7 @@ void TestBorrowedBuffer() {
     Check(stream.GetData() == raw, "borrowed buffer is not copied");
 }
 
-}  // namespace
+}
 
 int main() {
     TestBitRoundTrip();

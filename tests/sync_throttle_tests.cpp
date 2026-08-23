@@ -56,11 +56,9 @@ void TestAnyChangeGoesImmediately() {
 
     Check(Offer(throttle, sync, 1000), "the first payload is sent");
 
-    // A single byte is enough; the comparison covers the whole payload.
     sync.armour = 1;
     Check(Offer(throttle, sync, 1001), "a changed payload goes out at once");
 
-    // And the new payload becomes the one future frames are compared against.
     Check(!Offer(throttle, sync, 1002), "the changed payload is now the baseline");
 }
 
@@ -70,7 +68,6 @@ void TestSmallestPossibleChangeIsNoticed() {
 
     Check(Offer(throttle, sync, 0), "the first payload is sent");
 
-    // The last field of the payload must be covered too.
     sync.animationFlags = 1;
     Check(Offer(throttle, sync, 1), "a change in the final field is noticed");
 }
@@ -79,7 +76,6 @@ void TestClockWrapDoesNotStallSending() {
     samp::protocol::SyncThrottle throttle;
     samp::protocol::OnFootSyncData sync{};
 
-    // Send just before the counter wraps, then ask again just after.
     const std::uint32_t beforeWrap = 0xFFFFFF00;
     Check(Offer(throttle, sync, beforeWrap), "the first payload is sent");
 
@@ -130,8 +126,6 @@ void TestNothingIsWrittenWhenHeldBack() {
                                           first),
           "the first payload is built");
 
-    // A held-back frame must leave the stream alone rather than writing a
-    // header with nothing behind it.
     samp::net::BitStream second;
     Check(!samp::protocol::BuildSyncPacket(throttle, samp::protocol::PacketId::PlayerSync, sync, 1,
                                            second),
@@ -140,7 +134,7 @@ void TestNothingIsWrittenWhenHeldBack() {
 }
 
 void TestEachSyncKindKeepsItsOwnBaseline() {
-    // One throttle per kind: an aim update must not suppress a player update.
+
     samp::protocol::SyncThrottle onFoot;
     samp::protocol::SyncThrottle aim;
 
@@ -164,21 +158,18 @@ void TestEachSyncKindKeepsItsOwnBaseline() {
 void TestSyncInterval() {
     using samp::protocol::SyncIntervalMs;
 
-    // Nothing to report: a slow heartbeat regardless of the other settings.
     Check(SyncIntervalMs(false, true, 30, 50) == samp::protocol::kIdleSyncIntervalMs,
           "with no player object the idle interval wins over everything else");
 
-    // The pinned rate ignores both the base and the crowd.
     Check(SyncIntervalMs(true, true, 30, 50) == samp::protocol::kHighRateSyncIntervalMs,
           "the high rate is fixed and ignores the player count");
 
-    // Otherwise the crowd slows every client down.
     Check(SyncIntervalMs(true, false, 30, 0) == 30, "an empty area uses the base interval");
     Check(SyncIntervalMs(true, false, 30, 40) == 70,
           "each tracked player adds a millisecond to the interval");
 }
 
-}  // namespace
+}
 
 int main() {
     TestSyncInterval();

@@ -43,7 +43,6 @@ void TestUnregisteredIsNotAnError() {
     samp::net::BitStream payload;
     samp::protocol::WriteChatMessage(payload, {1, "ignored"});
 
-    // A client is not obliged to answer every id, so this is normal.
     Check(dispatcher.Dispatch(samp::protocol::RpcId::Chat, payload) ==
               samp::protocol::DispatchResult::Unregistered,
           "an unbound id reports as unregistered, not as a failure");
@@ -58,7 +57,6 @@ void TestMalformedIsDistinctFromUnregistered() {
         samp::protocol::RpcId::Chat, samp::protocol::ReadChatMessage,
         [&](const samp::protocol::ChatMessage&) { ran = true; });
 
-    // Claims eight bytes of text but supplies three.
     samp::net::BitStream payload;
     payload.Write<std::uint16_t>(1);
     payload.Write<std::uint8_t>(8);
@@ -76,7 +74,6 @@ void TestEmptyBodiedBinding() {
     int restarts = 0;
     dispatcher.On(samp::protocol::RpcId::GameModeRestart, [&] { ++restarts; });
 
-    // Nothing follows the id, and that has to be enough.
     samp::net::BitStream empty;
     Check(dispatcher.Dispatch(samp::protocol::RpcId::GameModeRestart, empty) ==
               samp::protocol::DispatchResult::Handled,
@@ -127,7 +124,7 @@ void TestSeveralIdsCoexist() {
     Check(dispatcher.Size() == 0, "clearing drops every binding");
 }
 
-}  // namespace
+}
 
 int main() {
     TestTypedDispatch();

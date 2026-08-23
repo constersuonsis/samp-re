@@ -5,12 +5,11 @@
 namespace samp::crypto {
 namespace {
 
-/// The mixing step both halves go through before the round key is applied.
 std::uint32_t Mix(std::uint32_t value) {
     return value + ((value << 4) ^ (value >> 5));
 }
 
-}  // namespace
+}
 
 XteaCipher::XteaCipher(const Key& key, std::uint32_t delta) : key_(key), delta_(delta) {}
 
@@ -74,4 +73,4 @@ bool XteaCipher::Decrypt(void* data, std::size_t size) const {
     return true;
 }
 
-}  // namespace samp::crypto
+}

@@ -42,7 +42,7 @@ void TestTimestampedHeader() {
 }
 
 void TestPayloadStartsWhereExpected() {
-    // The whole point of resolving the prefix is that the payload lines up.
+
     samp::protocol::VehicleSyncData sent;
     sent.vehicleId = 77;
     sent.rotation = {1.0f, 0.0f, 0.0f, 0.0f};
@@ -66,8 +66,7 @@ void TestPayloadStartsWhereExpected() {
 }
 
 void TestMarkerIsNotMistakenForAnId() {
-    // A packet whose real id happens to equal the marker cannot exist, but a
-    // reader that skips the check would report the marker as the message.
+
     samp::net::BitStream packet;
     packet.Write(static_cast<std::uint8_t>(samp::protocol::PacketId::Timestamp));
     packet.Write<std::uint32_t>(42);
@@ -91,7 +90,7 @@ void TestTruncatedTimestampIsRejected() {
     Check(header.id == 0, "a rejected header leaves nothing behind");
 }
 
-}  // namespace
+}
 
 int main() {
     TestPlainHeader();

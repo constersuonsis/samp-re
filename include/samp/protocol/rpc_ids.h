@@ -4,14 +4,7 @@
 
 namespace samp::protocol {
 
-/// Remote procedure identifiers used by the client protocol.
-///
-/// Each id travels as a single byte. The client registers a handler for every
-/// value in the Incoming group at start-up; the Outgoing values only ever leave
-/// the client. A handful of operations use one id in each direction, which is
-/// why damage appears twice.
 enum class RpcId : std::uint8_t {
-    // --- Server to client ---------------------------------------------------
 
     SetPlayerName = 11,
     SetPlayerPosition = 12,
@@ -50,7 +43,7 @@ enum class RpcId : std::uint8_t {
     DeathMessage = 55,
     SetPlayerMapIcon = 56,
     RemoveVehicleComponent = 57,
-    /// Frees a label slot rather than editing one in place.
+
     Remove3DTextLabel = 58,
     ChatBubble = 59,
     SomeUpdate = 60,
@@ -96,8 +89,7 @@ enum class RpcId : std::uint8_t {
     ServerNetStats = 102,
     ClientCheck = 103,
     EnableStuntBonus = 104,
-    /// Travels in both directions: the server pushes a vehicle's damage state,
-    /// and the client sends the same message when the vehicle it drives changes.
+
     VehicleDamageStatus = 106,
     SetCheckpoint = 107,
     ApplyObjectMovement = 108,
@@ -141,25 +133,17 @@ enum class RpcId : std::uint8_t {
     SetActorPosition = 176,
     SetActorHealth = 178,
 
-    // --- Client to server ---------------------------------------------------
-
+    DialogResponse = 62,
     GiveTakeDamage = 115,
     SetSpectatorMode = 118,
     CameraTarget = 168,
     GiveActorDamage = 177,
 };
 
-/// Convenience for writing an id into a stream.
 constexpr std::uint8_t ToByte(RpcId id) {
     return static_cast<std::uint8_t>(id);
 }
 
-/// True for ids whose message has no fields at all.
-///
-/// These arrive as nothing but the id: the handlers do not even open the
-/// payload for reading. A dispatcher must not wait for a body after one of
-/// them, and a reader must treat an empty remainder as success rather than as
-/// a truncated packet.
 constexpr bool HasEmptyBody(RpcId id) {
     switch (id) {
         case RpcId::EnterEditObject:
@@ -177,4 +161,4 @@ constexpr bool HasEmptyBody(RpcId id) {
     }
 }
 
-}  // namespace samp::protocol
+}

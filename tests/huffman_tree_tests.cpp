@@ -1,4 +1,5 @@
 #include "samp/compression/huffman_tree.h"
+#include "samp/compression/text_frequencies.h"
 
 #include <cstdio>
 #include <cstring>
@@ -14,6 +15,20 @@ void Check(bool condition, const char* what) {
         std::printf("FAIL: %s\n", what);
         ++g_failures;
     }
+}
+
+void TestDefaultFrequenciesMatchReference() {
+    using samp::compression::kDefaultTextFrequencies;
+
+    long long total = 0;
+    for (const int frequency : kDefaultTextFrequencies) {
+        total += frequency;
+    }
+    Check(total == 65380, "the default table checksum matches the reference");
+    Check(kDefaultTextFrequencies[32] == 11084, "space is the most common symbol");
+    Check(kDefaultTextFrequencies[10] == 722 && kDefaultTextFrequencies[13] == 2,
+          "line endings keep their reference weights");
+    Check(kDefaultTextFrequencies[37] == 31, "percent keeps its reference weight");
 }
 
 samp::compression::HuffmanTree::FrequencyTable FrequenciesOf(const std::string& sample) {
@@ -51,7 +66,7 @@ void TestCompressionActuallyShrinks() {
 }
 
 void TestEveryByteStaysEncodable() {
-    // Frequencies are all zero, so every symbol relies on the weight floor.
+
     const samp::compression::HuffmanTree::FrequencyTable empty{};
     const samp::compression::HuffmanTree tree(empty);
 
@@ -62,7 +77,6 @@ void TestEveryByteStaysEncodable() {
         }
     }
 
-    // With a flat table the tree is balanced, so codes stay near eight bits.
     const auto singleByte = static_cast<std::uint8_t>('Z');
     Check(tree.GetCodeLength(singleByte) == 8, "a flat table yields fixed-width codes");
 }
@@ -74,8 +88,6 @@ void TestDecodeReportsLengthBeyondCapacity() {
     samp::net::BitStream stream;
     const int bits = tree.Encode(sample.data(), sample.size(), stream);
 
-    // A short buffer must not stop the walk: the bits still have to be consumed
-    // so anything following in the stream stays readable.
     char small[4] = {};
     const std::size_t produced = tree.Decode(stream, bits, small, sizeof(small));
 
@@ -85,7 +97,7 @@ void TestDecodeReportsLengthBeyondCapacity() {
 }
 
 void TestFrequenciesShapeTheTree() {
-    // A symbol that dominates the sample must end up cheaper than a rare one.
+
     std::string skewed(100, 'x');
     skewed += "qz";
 
@@ -119,8 +131,7 @@ void TestEmptyBlockRoundTrip() {
 }
 
 void TestBlockCarriesItsOwnTable() {
-    // Two blocks with very different content must each decode correctly, which
-    // they cannot do from a shared table.
+
     const std::string first(300, 'a');
     std::string second;
     for (int i = 0; i < 300; ++i) {
@@ -143,7 +154,7 @@ void TestBlockCarriesItsOwnTable() {
 }
 
 void TestOversizedClaimIsRefused() {
-    // The declared size arrives from the wire and must not be trusted.
+
     samp::net::BitStream stream;
     stream.WriteCompressed<std::uint32_t>(500);
 
@@ -159,7 +170,6 @@ void TestCorruptBlockIsRefused() {
     samp::net::BitStream stream;
     Check(samp::compression::CompressBlock(sample.data(), sample.size(), stream), "block packs");
 
-    // Shorten the encoded run so it no longer decodes to the promised length.
     stream.SetWriteOffset(stream.GetNumberOfBitsUsed() - 8);
 
     std::vector<std::uint8_t> decoded;
@@ -167,7 +177,7 @@ void TestCorruptBlockIsRefused() {
           "a run that decodes short of its declared size is refused");
 }
 
-}  // namespace
+}
 
 int main() {
     TestBlockRoundTrip();
@@ -180,6 +190,7 @@ int main() {
     TestEveryByteStaysEncodable();
     TestDecodeReportsLengthBeyondCapacity();
     TestFrequenciesShapeTheTree();
+    TestDefaultFrequenciesMatchReference();
 
     if (g_failures == 0) {
         std::printf("All Huffman tests passed.\n");

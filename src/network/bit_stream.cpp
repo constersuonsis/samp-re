@@ -29,8 +29,7 @@ BitStream::BitStream(const void* data, std::size_t sizeInBytes, bool copyData)
       data_(nullptr),
       copyData_(copyData) {
     if (!copyData) {
-        // Const is cast away because a borrowed buffer may still be written to
-        // through SetData(); reads never modify it.
+
         data_ = static_cast<unsigned char*>(const_cast<void*>(data));
         return;
     }
@@ -61,8 +60,7 @@ void BitStream::AddBitsAndReallocate(int bitCount) {
 
     int newBitsAllocated = bitsUsed_ + bitCount;
     if (newBitsAllocated > 0 && ((bitsAllocated_ - 1) >> 3) < ((newBitsAllocated - 1) >> 3)) {
-        // Double the request so a stream that keeps growing does not reallocate
-        // on every write.
+
         newBitsAllocated = (bitsUsed_ + bitCount) * 2;
         const std::size_t bytesNeeded = BitsToBytes(newBitsAllocated);
 
@@ -81,8 +79,6 @@ void BitStream::AddBitsAndReallocate(int bitCount) {
         bitsAllocated_ = newBitsAllocated;
     }
 }
-
-// --- Writing ---------------------------------------------------------------
 
 void BitStream::WriteBit(bool value) {
     AddBitsAndReallocate(1);
@@ -143,7 +139,6 @@ void BitStream::WriteBytes(const void* input, std::size_t byteCount) {
         return;
     }
 
-    // Byte-aligned writes bypass the bit loop entirely.
     AddBitsAndReallocate(static_cast<int>(byteCount) * 8);
     std::memcpy(data_ + BitsToBytes(bitsUsed_), input, byteCount);
     bitsUsed_ += static_cast<int>(byteCount) * 8;
@@ -158,8 +153,6 @@ void BitStream::WriteCompressedBits(const void* input, int bitCount, bool unsign
     const unsigned char* source = static_cast<const unsigned char*>(input);
     const unsigned char redundantByte = unsignedData ? 0x00 : 0xFF;
 
-    // Little-endian layout: the most significant byte sits last, so the scan
-    // for redundant leading bytes runs downwards.
     int currentByte = (bitCount >> 3) - 1;
 
     while (currentByte > 0) {
@@ -179,8 +172,6 @@ void BitStream::WriteCompressedBits(const void* input, int bitCount, bool unsign
     WriteBit(upperNibbleRedundant);
     WriteBits(source + currentByte, upperNibbleRedundant ? 4 : 8, true);
 }
-
-// --- Reading ---------------------------------------------------------------
 
 bool BitStream::ReadBit() {
     const unsigned char mask = static_cast<unsigned char>(0x80 >> (readOffset_ & 7));
@@ -298,8 +289,6 @@ bool BitStream::ReadCompressedBits(void* output, int bitCount, bool unsignedData
     return true;
 }
 
-// --- Position and state ----------------------------------------------------
-
 void BitStream::Reset() {
     bitsUsed_ = 0;
     readOffset_ = 0;
@@ -356,4 +345,4 @@ void BitStream::CopyBitsFrom(BitStream& source, int bitCount) {
     }
 }
 
-}  // namespace samp::net
+}

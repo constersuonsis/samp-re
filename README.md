@@ -151,6 +151,8 @@ samp-client-r3/
 │   └── util/           # Data structures, Logger, Cmd
 ├── include/
 │   └── samp/           # Public headers
+├── third_party/
+│   └── raknet/         # Vendored networking library (not maintained here)
 ├── ida/
 │   ├── samp_dll.h      # IDA-generated type definitions
 │   └── samp_named_dump.txt  # Full IDA function dump (6244 functions)
@@ -191,11 +193,17 @@ These files are provided for reference and documentation purposes.
 
 ---
 
+## Dependencies
+
+The client links one third-party library, vendored in `third_party/raknet/`: the RakNet 3.x generation the SA-MP wire protocol is built on. It is used under the GPL option its headers offer ("version 2 or, at your option, any later version"), which is what makes it compatible with this project's GPL v3. See [third_party/raknet/README.md](third_party/raknet/README.md) for its provenance and for the local modifications it carries.
+
+Everything under `src/` and `include/` is this project's own code and depends on RakNet only through the `samp::net::Transport` interface, so the protocol layers stay independent of it.
+
 ## Disclaimer
 
-This project is a clean-room reimplementation based on reverse engineering for interoperability and preservation purposes. It is not affiliated with or endorsed by the SA-MP team or Rockstar Games. GTA San Andreas is a trademark of Rockstar Games.
+This project reimplements the client for interoperability and preservation purposes. It is not affiliated with or endorsed by the SA-MP team or Rockstar Games. GTA San Andreas is a trademark of Rockstar Games.
 
-This project does **not** include any original binary code from `samp.dll`.
+This project does **not** include any original binary code from `samp.dll`. It does ship a copy of RakNet, which is third-party source under its own license as described above.
 
 ---
 

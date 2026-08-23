@@ -15,7 +15,6 @@ bool ReadPacketHeader(net::BitStream& packet, PacketHeader& header) {
         return true;
     }
 
-    // The marker is followed by the send time and then by the real id.
     if (!packet.Read(header.timestamp) || !packet.Read(header.id)) {
         header = PacketHeader{};
         return false;
@@ -34,4 +33,4 @@ void WritePacketHeader(net::BitStream& packet, const PacketHeader& header) {
     packet.Write(header.id);
 }
 
-}  // namespace samp::protocol
+}
