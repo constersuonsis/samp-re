@@ -150,6 +150,27 @@ void TestBorrowedBuffer() {
     Check(stream.GetData() == raw, "borrowed buffer is not copied");
 }
 
+void TestAssureBufferIsCopy() {
+    std::uint8_t raw[] = {0x11, 0x22, 0x33, 0x44};
+    samp::net::BitStream stream(raw, sizeof(raw), false);
+    Check(stream.GetData() == raw, "starts out borrowing the caller's buffer");
+
+    stream.AssureBufferIsCopy();
+    Check(stream.GetData() != raw, "now owns its own copy");
+
+    std::uint8_t byte = 0;
+    Check(stream.ReadBytes(&byte, 1) && byte == 0x11, "the copy keeps the original bytes");
+
+    raw[0] = 0xFF;
+    Check(stream.GetData()[0] == 0x11, "mutating the source buffer no longer affects the stream");
+
+    samp::net::BitStream owning;
+    owning.Write<std::uint8_t>(0xAB);
+    const unsigned char* before = owning.GetData();
+    owning.AssureBufferIsCopy();
+    Check(owning.GetData() == before, "a stream that already owns its buffer is left alone");
+}
+
 }
 
 int main() {
@@ -161,6 +182,7 @@ int main() {
     TestAlignedBytes();
     TestHeapGrowth();
     TestBorrowedBuffer();
+    TestAssureBufferIsCopy();
 
     if (g_failures == 0) {
         std::printf("All BitStream tests passed.\n");

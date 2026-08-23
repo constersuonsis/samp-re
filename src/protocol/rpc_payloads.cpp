@@ -1857,4 +1857,96 @@ bool ReadObjectMaterials(net::BitStream& stream, std::uint8_t count,
     return true;
 }
 
+bool ReadPlayAnimation(net::BitStream& stream, PlayAnimation& message) {
+    message = PlayAnimation{};
+
+    if (!stream.Read(message.playerId)) {
+        return false;
+    }
+    if (!ReadString8(stream, message.library)) {
+        message = PlayAnimation{};
+        return false;
+    }
+    if (!ReadString8(stream, message.name)) {
+        message = PlayAnimation{};
+        return false;
+    }
+
+    std::uint8_t loop = 0;
+    std::uint8_t lockX = 0;
+    std::uint8_t freeze = 0;
+    std::uint8_t lockY = 0;
+
+    if (!stream.Read(message.delta) || !stream.Read(loop) || !stream.Read(lockX) ||
+        !stream.Read(freeze) || !stream.Read(lockY) || !stream.Read(message.time)) {
+        message = PlayAnimation{};
+        return false;
+    }
+
+    message.loop = loop != 0;
+    message.lockX = lockX != 0;
+    message.freeze = freeze != 0;
+    message.lockY = lockY != 0;
+    return true;
+}
+
+void WritePlayAnimation(net::BitStream& stream, const PlayAnimation& message) {
+    stream.Write(message.playerId);
+    WriteString8(stream, message.library);
+    WriteString8(stream, message.name);
+    stream.Write(message.delta);
+    stream.Write(static_cast<std::uint8_t>(message.loop ? 1 : 0));
+    stream.Write(static_cast<std::uint8_t>(message.lockX ? 1 : 0));
+    stream.Write(static_cast<std::uint8_t>(message.freeze ? 1 : 0));
+    stream.Write(static_cast<std::uint8_t>(message.lockY ? 1 : 0));
+    stream.Write(message.time);
+}
+
+bool ReadSetPlayerAnimationIndex(net::BitStream& stream, SetPlayerAnimationIndex& message) {
+    message = SetPlayerAnimationIndex{};
+    return stream.Read(message.animationIndex);
+}
+
+void WriteSetPlayerAnimationIndex(net::BitStream& stream, const SetPlayerAnimationIndex& message) {
+    stream.Write(message.animationIndex);
+}
+
+bool ReadSetVehicleControllable(net::BitStream& stream, SetVehicleControllable& message) {
+    message = SetVehicleControllable{};
+
+    std::uint8_t controllable = 0;
+    if (!stream.Read(message.playerId) || !stream.Read(controllable)) {
+        message = SetVehicleControllable{};
+        return false;
+    }
+
+    message.controllable = controllable != 0;
+    return true;
+}
+
+void WriteSetVehicleControllable(net::BitStream& stream, const SetVehicleControllable& message) {
+    stream.Write(message.playerId);
+    stream.Write(static_cast<std::uint8_t>(message.controllable ? 1 : 0));
+}
+
+bool ReadSpawnPlayerFull(net::BitStream& stream, SpawnPlayerFull& message) {
+    message = SpawnPlayerFull{};
+
+    return stream.Read(message.skinId) && stream.Read(message.x) && stream.Read(message.y) &&
+           stream.Read(message.z) && stream.Read(message.angle) &&
+           stream.Read(message.weapon1) && stream.Read(message.weapon2) &&
+           stream.Read(message.weapon3);
+}
+
+void WriteSpawnPlayerFull(net::BitStream& stream, const SpawnPlayerFull& message) {
+    stream.Write(message.skinId);
+    stream.Write(message.x);
+    stream.Write(message.y);
+    stream.Write(message.z);
+    stream.Write(message.angle);
+    stream.Write(message.weapon1);
+    stream.Write(message.weapon2);
+    stream.Write(message.weapon3);
+}
+
 }

@@ -86,6 +86,8 @@ public:
 
     void SetData(unsigned char* data);
 
+    void AssureBufferIsCopy();
+
     int CopyData(unsigned char** output) const;
 
     void CopyBitsFrom(BitStream& source, int bitCount);

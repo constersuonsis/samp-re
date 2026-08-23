@@ -326,6 +326,23 @@ void BitStream::SetData(unsigned char* data) {
     copyData_ = false;
 }
 
+void BitStream::AssureBufferIsCopy() {
+    if (copyData_) {
+        return;
+    }
+
+    copyData_ = true;
+    if (bitsAllocated_ <= 0) {
+        data_ = nullptr;
+        return;
+    }
+
+    const std::size_t byteCount = BitsToBytes(bitsAllocated_);
+    unsigned char* owned = static_cast<unsigned char*>(std::malloc(byteCount));
+    std::memcpy(owned, data_, byteCount);
+    data_ = owned;
+}
+
 int BitStream::CopyData(unsigned char** output) const {
     const std::size_t byteCount = BitsToBytes(bitsUsed_);
     *output = new unsigned char[byteCount];

@@ -133,6 +133,13 @@ enum class RpcId : std::uint8_t {
     SetActorPosition = 176,
     SetActorHealth = 178,
 
+    PlayAnimation = 86,
+    SetPlayerAnimationByIndex = 92,
+    SetPlayerAnimationByIndexAlt = 150,
+    SetVehicleControllable = 80,
+    SpawnPlayerFull = 112,
+    SetPlayerSkin = 153,
+
     DialogResponse = 62,
     GiveTakeDamage = 115,
     SetSpectatorMode = 118,

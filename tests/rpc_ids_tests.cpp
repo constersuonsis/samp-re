@@ -86,7 +86,10 @@ std::vector<samp::protocol::RpcId> IncomingIds() {
             RpcId::ClearAnimations,       RpcId::SetPlayerSpecialAction,
             RpcId::SetVehicleDoors,       RpcId::EnableStuntBonus,
             RpcId::SetActorFacingAngle,
-            RpcId::SetActorPosition,      RpcId::SetActorHealth};
+            RpcId::SetActorPosition,      RpcId::SetActorHealth,
+            RpcId::PlayAnimation,         RpcId::SetPlayerAnimationByIndex,
+            RpcId::SetPlayerAnimationByIndexAlt, RpcId::SetVehicleControllable,
+            RpcId::SpawnPlayerFull,       RpcId::SetPlayerSkin};
 }
 
 void TestRegisteredIdsAreUnique() {
@@ -98,7 +101,7 @@ void TestRegisteredIdsAreUnique() {
     std::sort(values.begin(), values.end());
     const auto duplicate = std::adjacent_find(values.begin(), values.end());
     Check(duplicate == values.end(), "no two handlers share an id");
-    Check(values.size() == 124, "every registered handler is accounted for");
+    Check(values.size() == 130, "every registered handler is accounted for");
 }
 
 void TestIdsFitOneByte() {

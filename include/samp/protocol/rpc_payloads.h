@@ -1262,4 +1262,48 @@ void WriteSpectateTarget(net::BitStream& stream, const SpectateTarget& message);
 
 std::uint8_t CameraModeForSpectate(std::uint8_t mode, bool spectatingVehicle);
 
+struct PlayAnimation {
+    std::uint16_t playerId = 0;
+    std::string library;
+    std::string name;
+    float delta = 0.0f;
+    bool loop = false;
+    bool lockX = false;
+    bool freeze = false;
+    bool lockY = false;
+    std::uint32_t time = 0;
+};
+
+bool ReadPlayAnimation(net::BitStream& stream, PlayAnimation& message);
+void WritePlayAnimation(net::BitStream& stream, const PlayAnimation& message);
+
+struct SetPlayerAnimationIndex {
+    std::uint32_t animationIndex = 0;
+};
+
+bool ReadSetPlayerAnimationIndex(net::BitStream& stream, SetPlayerAnimationIndex& message);
+void WriteSetPlayerAnimationIndex(net::BitStream& stream, const SetPlayerAnimationIndex& message);
+
+struct SetVehicleControllable {
+    std::uint16_t playerId = 0;
+    bool controllable = false;
+};
+
+bool ReadSetVehicleControllable(net::BitStream& stream, SetVehicleControllable& message);
+void WriteSetVehicleControllable(net::BitStream& stream, const SetVehicleControllable& message);
+
+struct SpawnPlayerFull {
+    std::uint16_t skinId = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float angle = 0.0f;
+    std::uint32_t weapon1 = 0;
+    std::uint32_t weapon2 = 0;
+    std::uint32_t weapon3 = 0;
+};
+
+bool ReadSpawnPlayerFull(net::BitStream& stream, SpawnPlayerFull& message);
+void WriteSpawnPlayerFull(net::BitStream& stream, const SpawnPlayerFull& message);
+
 }

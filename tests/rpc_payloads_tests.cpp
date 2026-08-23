@@ -1831,6 +1831,94 @@ void TestObjectMovementMessages() {
           "the target rotation request round-trips");
 }
 
+void TestSetPlayerSkinRoundTrip() {
+    samp::net::BitStream stream;
+    samp::protocol::WriteSetPlayerSkin(stream, {5, 42});
+    Check(stream.GetNumberOfBitsUsed() == 8 * 8, "a skin change is two 32-bit fields");
+
+    samp::protocol::SetPlayerSkin received;
+    Check(samp::protocol::ReadSetPlayerSkin(stream, received), "skin change reads back");
+    Check(received.playerId == 5 && received.skinId == 42, "skin change round-trips");
+}
+
+void TestPlayAnimationRoundTrip() {
+    samp::protocol::PlayAnimation sent;
+    sent.playerId = 12;
+    sent.library = "PED";
+    sent.name = "WALK_civi";
+    sent.delta = 4.1f;
+    sent.loop = true;
+    sent.lockX = false;
+    sent.freeze = true;
+    sent.lockY = false;
+    sent.time = 0;
+
+    samp::net::BitStream stream;
+    samp::protocol::WritePlayAnimation(stream, sent);
+
+    samp::protocol::PlayAnimation received;
+    Check(samp::protocol::ReadPlayAnimation(stream, received), "an animation request reads back");
+    Check(received.playerId == 12, "the player id round-trips");
+    Check(received.library == "PED" && received.name == "WALK_civi",
+          "the library and animation names round-trip");
+    Check(received.delta == 4.1f, "the blend delta round-trips");
+    Check(received.loop && !received.lockX && received.freeze && !received.lockY,
+          "each flag keeps its own value, not just the first one");
+}
+
+void TestSetPlayerAnimationIndexRoundTrip() {
+    samp::net::BitStream stream;
+    samp::protocol::WriteSetPlayerAnimationIndex(stream, {77});
+
+    samp::protocol::SetPlayerAnimationIndex received;
+    Check(samp::protocol::ReadSetPlayerAnimationIndex(stream, received) &&
+              received.animationIndex == 77,
+          "an animation index round-trips");
+}
+
+void TestSetVehicleControllableRoundTrip() {
+    samp::net::BitStream stream;
+    samp::protocol::WriteSetVehicleControllable(stream, {9, true});
+    Check(stream.GetNumberOfBitsUsed() == 3 * 8,
+          "a controllable flag costs a player id plus one byte");
+
+    samp::protocol::SetVehicleControllable received;
+    Check(samp::protocol::ReadSetVehicleControllable(stream, received) && received.playerId == 9 &&
+              received.controllable,
+          "a controllable flag round-trips");
+
+    samp::net::BitStream falseStream;
+    samp::protocol::WriteSetVehicleControllable(falseStream, {9, false});
+    samp::protocol::SetVehicleControllable falseReceived;
+    Check(samp::protocol::ReadSetVehicleControllable(falseStream, falseReceived) &&
+              !falseReceived.controllable,
+          "a cleared controllable flag stays false, not just non-true");
+}
+
+void TestSpawnPlayerFullRoundTrip() {
+    samp::protocol::SpawnPlayerFull sent;
+    sent.skinId = 7;
+    sent.x = 100.5f;
+    sent.y = -200.25f;
+    sent.z = 13.0f;
+    sent.angle = 90.0f;
+    sent.weapon1 = 24;
+    sent.weapon2 = 25;
+    sent.weapon3 = 0;
+
+    samp::net::BitStream stream;
+    samp::protocol::WriteSpawnPlayerFull(stream, sent);
+
+    samp::protocol::SpawnPlayerFull received;
+    Check(samp::protocol::ReadSpawnPlayerFull(stream, received), "a full spawn reads back");
+    Check(received.skinId == 7, "the skin id round-trips");
+    Check(received.x == 100.5f && received.y == -200.25f && received.z == 13.0f,
+          "the spawn position round-trips");
+    Check(received.angle == 90.0f, "the facing angle round-trips");
+    Check(received.weapon1 == 24 && received.weapon2 == 25 && received.weapon3 == 0,
+          "all three starting weapons round-trip, including the empty slot");
+}
+
 }
 
 int main() {
@@ -1931,6 +2019,11 @@ int main() {
     TestTruncatedStringIsRejected();
     TestLongStringIsClamped();
     TestDialogHeaderRoundTrip();
+    TestSetPlayerSkinRoundTrip();
+    TestPlayAnimationRoundTrip();
+    TestSetPlayerAnimationIndexRoundTrip();
+    TestSetVehicleControllableRoundTrip();
+    TestSpawnPlayerFullRoundTrip();
 
     if (g_failures == 0) {
         std::printf("All RPC payload tests passed.\n");
