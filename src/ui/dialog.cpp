@@ -1,59 +1,57 @@
 #include "samp/ui/dialog.h"
 
-#include <string>
+#include <windows.h>
+
+#include <cstddef>
+#include <cstring>
 
 namespace samp::ui {
-
 namespace {
 
-struct ShowDialogMessage {
-    protocol::DialogHeader header;
-    std::string body;
-};
-
-bool ReadShowDialogMessage(samp::net::BitStream& stream, ShowDialogMessage& message) {
-    message = ShowDialogMessage{};
-    if (!protocol::ReadDialogHeader(stream, message.header)) {
-        return false;
-    }
-    return protocol::ReadCompressedText(stream, message.body);
+void WriteDword(unsigned char *base, size_t offset, unsigned value) {
+  std::memcpy(base + offset, &value, sizeof(value));
 }
 
+}  // namespace
+
+DialogState *CreateDialogState(unsigned device) {
+  DialogState *dialog = new DialogState();
+  WriteDword(dialog->raw, 0, device);
+  WriteDword(dialog->raw, 28, 0);
+  WriteDword(dialog->raw, 40, 0);
+  WriteDword(dialog->raw, 52, 0);
+  WriteDword(dialog->raw, 48, 0);
+  WriteDword(dialog->raw, 44, 0);
+  WriteDword(dialog->raw, 12, 600);
+  WriteDword(dialog->raw, 16, 300);
+  WriteDword(dialog->raw, 20, 100);
+  WriteDword(dialog->raw, 24, 30);
+  std::memset(dialog->raw + 137, 0, 0x204);
+  return dialog;
 }
 
-void BindDialog(protocol::SampClient& client, DialogState& state) {
-    client.Dispatcher().On<ShowDialogMessage>(
-        protocol::RpcId::ShowDialog, &ReadShowDialogMessage,
-        [&state](const ShowDialogMessage& message) {
-            state.open = true;
-            state.header = message.header;
-            state.body = message.body;
-        });
+VehicleSelect *CreateVehicleSelect(unsigned device) {
+  VehicleSelect *select = new VehicleSelect();
+  WriteDword(select->raw, 0, device);
+  WriteDword(select->raw, 32, 0);
+  WriteDword(select->raw, 36, 0);
+  WriteDword(select->raw, 12, 280);
+  WriteDword(select->raw, 16, 150);
+  WriteDword(select->raw, 20, 210);
+  WriteDword(select->raw, 24, 30);
+  WriteDword(select->raw, 28, 38);
+  return select;
 }
 
-bool SubmitDialog(protocol::SampClient& client, DialogState& state,
-                  protocol::DialogButton button, std::int16_t listIndex,
-                  const std::string& inputText, bool hasInput) {
-    if (!state.open) {
-        return false;
-    }
-
-    protocol::DialogResponse response;
-    response.dialogId = state.header.dialogId;
-    response.button = button;
-    response.listIndex = listIndex;
-    response.hasInput = hasInput;
-    response.inputText = inputText;
-
-    net::BitStream payload;
-    WriteDialogResponse(payload, response);
-    if (!client.SendRpc(protocol::RpcId::DialogResponse, payload)) {
-        return false;
-    }
-
-    state.open = false;
-    state.body.clear();
-    return true;
+VehicleSelectSmall *CreateVehicleSelectSmall(unsigned device) {
+  VehicleSelectSmall *select = new VehicleSelectSmall();
+  WriteDword(select->raw, 0, 0);
+  WriteDword(select->raw, 4, 0);
+  WriteDword(select->raw, 8, ::GetTickCount());
+  WriteDword(select->raw, 16, 0);
+  WriteDword(select->raw, 12, 0);
+  WriteDword(select->raw, 20, device);
+  return select;
 }
 
-}
+}  // namespace samp::ui

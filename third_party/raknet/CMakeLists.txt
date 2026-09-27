@@ -30,7 +30,11 @@ add_library(raknet STATIC
     _findfirst.cpp
 )
 
-target_compile_definitions(raknet PRIVATE _RAKNET_LIB)
+target_compile_definitions(raknet PRIVATE _RAKNET_LIB _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+
+if(MSVC)
+    target_compile_options(raknet PRIVATE /W3 /wd4005)
+endif()
 target_include_directories(raknet PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_include_directories(raknet SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

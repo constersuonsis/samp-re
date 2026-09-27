@@ -1,22 +1,21 @@
 #pragma once
 
-#include "samp/protocol/rpc_payloads.h"
-#include "samp/protocol/samp_client.h"
-
-#include <string>
-
 namespace samp::ui {
 
 struct DialogState {
-    bool open = false;
-    protocol::DialogHeader header;
-    std::string body;
+  unsigned char raw[0x29D] = {};
 };
 
-void BindDialog(protocol::SampClient& client, DialogState& state);
+struct VehicleSelect {
+  unsigned char raw[0x28] = {};
+};
 
-bool SubmitDialog(protocol::SampClient& client, DialogState& state,
-                  protocol::DialogButton button, std::int16_t listIndex,
-                  const std::string& inputText, bool hasInput);
+struct VehicleSelectSmall {
+  unsigned char raw[0x18] = {};
+};
 
-}
+DialogState *CreateDialogState(unsigned device);
+VehicleSelect *CreateVehicleSelect(unsigned device);
+VehicleSelectSmall *CreateVehicleSelectSmall(unsigned device);
+
+}  // namespace samp::ui
