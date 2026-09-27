@@ -89,12 +89,18 @@ void ClientTick(bool paused) {
   }
 }
 
-int InvokeStatusOpA() {
-  return 0;
+int InvokeStatusCommand(const void *descriptor) {
+  using CommandInvoker = int(__cdecl *)(const void *, ...);
+  auto invoke = reinterpret_cast<CommandInvoker>(0x100B1A80);
+  return invoke(descriptor, 1);
 }
 
-int InvokeStatusOpB() {
-  return 0;
+int InvokeInitialStatusCommand() {
+  return InvokeStatusCommand(reinterpret_cast<const void *>(0x100EC9C8));
+}
+
+int InvokeNextStatusCommand() {
+  return InvokeStatusCommand(reinterpret_cast<const void *>(0x100EC9DC));
 }
 
 int RunStatusMachine() {
@@ -109,9 +115,9 @@ int RunStatusMachine() {
   int result = static_cast<int>(status[0]);
   if (status[0]) {
     if (result == 1) {
-      result = InvokeStatusOpA();
+      result = InvokeInitialStatusCommand();
       if (result) {
-        result = InvokeStatusOpB();
+        result = InvokeNextStatusCommand();
         status[0] = 2;
       }
     }

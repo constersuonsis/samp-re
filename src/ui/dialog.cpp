@@ -1,4 +1,5 @@
 #include "samp/ui/dialog.h"
+#include "samp/ui/render_device.h"
 
 #include <windows.h>
 
@@ -8,11 +9,32 @@
 namespace samp::ui {
 namespace {
 
+static_assert(sizeof(DialogSystem) == 0x24);
+
 void WriteDword(unsigned char *base, size_t offset, unsigned value) {
   std::memcpy(base + offset, &value, sizeof(value));
 }
 
 }  // namespace
+
+DialogSystem *CreateDialogSystem(void *device) {
+  if (!device) {
+    return nullptr;
+  }
+  DialogSystem *system = new DialogSystem();
+  system->device = device;
+  system->sprite = Direct3DRenderDevice(device).CreateSprite();
+  if (system->sprite) {
+    using ResetSpriteFunction = unsigned long(__stdcall *)(void *);
+    void **sprite_vtable = *reinterpret_cast<void ***>(system->sprite);
+    reinterpret_cast<ResetSpriteFunction>(sprite_vtable[13])(system->sprite);
+  }
+  using CreateStateBlockFunction = HRESULT(__stdcall *)(void *, int, void **);
+  void **device_vtable = *reinterpret_cast<void ***>(device);
+  reinterpret_cast<CreateStateBlockFunction>(device_vtable[59])(device, 1,
+                                                                &system->state_block);
+  return system;
+}
 
 DialogState *CreateDialogState(unsigned device) {
   DialogState *dialog = new DialogState();

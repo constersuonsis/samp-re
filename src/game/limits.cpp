@@ -2,11 +2,16 @@
 #include "samp/game/memory.h"
 
 namespace samp::game {
+namespace {
+
+const unsigned char g_limit_header[7] = {0x6A, 0x00, 0x68, 0xC6, 0x02, 0x00, 0x00};
+const unsigned char g_limit_tail[5] = {0x68, 0xFF, 0x7E, 0x00, 0x00};
+
+}
 
 void PatchLimits() {
   WaitForByte(reinterpret_cast<volatile unsigned char *>(0x551024), 104);
-  const unsigned char header[7] = {0x6A, 0x00, 0x68, 0xC6, 0x02, 0x00, 0x00};
-  WriteBytes(reinterpret_cast<void *>(0x551024), header, sizeof(header));
+  WriteBytes(reinterpret_cast<void *>(0x551024), g_limit_header, sizeof(g_limit_header));
   WriteDword(reinterpret_cast<void *>(0x55105F), 20000);
   WriteDword(reinterpret_cast<void *>(0x5510CF), 4000);
   WriteDword(reinterpret_cast<void *>(0x550F46), 100000);
@@ -18,8 +23,7 @@ void PatchLimits() {
   WriteByte(reinterpret_cast<void *>(0x551140), 5);
   WriteByte(reinterpret_cast<void *>(0x551178), 1);
   WriteDword(reinterpret_cast<void *>(0x54F3A1), 6000);
-  const unsigned char tail[5] = {0x68, 0xFF, 0x7E, 0x00, 0x00};
-  WriteBytes(reinterpret_cast<void *>(0x551106), tail, sizeof(tail));
+  WriteBytes(reinterpret_cast<void *>(0x551106), g_limit_tail, sizeof(g_limit_tail));
 }
 
 }  // namespace samp::game

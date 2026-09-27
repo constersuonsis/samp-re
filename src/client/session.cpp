@@ -41,6 +41,7 @@ unsigned char *g_text_buffer_a = nullptr;
 unsigned char *g_text_buffer_b = nullptr;
 int g_frame_limiter = 48;
 int g_sprite_arg = 0;
+void *g_dialog_system = nullptr;
 
 char g_base_directory[0x105] = {};
 
@@ -79,6 +80,7 @@ void *CreateSecondChat(void *device) {
 }
 
 void InitDialogSystem() {
+  g_dialog_system = samp::ui::CreateDialogSystem(g_game_device);
 }
 
 void *CreateRenderer(void *device) {
