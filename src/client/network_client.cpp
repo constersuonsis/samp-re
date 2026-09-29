@@ -90,6 +90,49 @@ struct PassengerSyncState {
   std::array<float, 3> position{};
 };
 
+struct AimSyncState {
+  std::uint8_t camera_mode = 0;
+  std::array<float, 3> aim_direction{};
+  std::array<float, 3> aim_position{};
+  float drunk_level = 0.0f;
+  std::uint8_t camera_weapon_state = 0;
+  std::uint8_t aspect_ratio = 0;
+};
+
+struct BulletSyncState {
+  std::uint8_t hit_type = 0;
+  std::uint16_t hit_id = 0;
+  std::array<float, 3> origin{};
+  std::array<float, 3> target{};
+  std::array<float, 3> center{};
+  std::uint8_t weapon_id = 0;
+};
+
+struct TrailerSyncState {
+  std::uint16_t trailer_id = 0;
+  std::array<float, 3> matrix_position{};
+  std::array<float, 4> rotation_quaternion{};
+  std::array<float, 3> position{};
+  std::array<float, 3> rotation{};
+};
+
+struct UnoccupiedSyncState {
+  std::uint16_t vehicle_id = 0;
+  std::uint8_t seat_id = 0;
+  std::array<float, 3> roll{};
+  std::array<float, 3> direction{};
+  std::array<float, 3> position{};
+  std::array<float, 3> velocity{};
+  std::array<float, 3> turn_speed{};
+  float vehicle_health = 0.0f;
+};
+
+struct MarkerSyncState {
+  std::array<std::int16_t, 3> position{};
+  std::uint32_t timestamp = 0;
+  bool has_marker = false;
+};
+
 struct RemotePlayerSpawnState {
   std::uint8_t skin_id = 0xFF;
   std::uint8_t special_action = 4;
@@ -105,19 +148,38 @@ struct RemotePlayer {
   PlayerSyncState sync_state{};
   VehicleSyncState vehicle_sync_state{};
   PassengerSyncState passenger_sync_state{};
+  AimSyncState aim_sync_state{};
+  BulletSyncState bullet_sync_state{};
+  TrailerSyncState trailer_sync_state{};
+  UnoccupiedSyncState unoccupied_sync_state{};
+  MarkerSyncState marker_sync_state{};
   RemotePlayerSpawnState spawn_state{};
   std::uint32_t last_sync_time = 0;
   std::uint32_t last_vehicle_sync_time = 0;
   std::uint32_t last_passenger_sync_time = 0;
+  std::uint32_t last_aim_sync_time = 0;
+  std::uint32_t last_bullet_sync_time = 0;
+  std::uint32_t last_trailer_sync_time = 0;
+  std::uint32_t last_unoccupied_sync_time = 0;
   std::uint32_t sync_packet_count = 0;
   std::uint32_t vehicle_sync_packet_count = 0;
   std::uint32_t passenger_sync_packet_count = 0;
+  std::uint32_t aim_sync_packet_count = 0;
+  std::uint32_t bullet_sync_packet_count = 0;
+  std::uint32_t trailer_sync_packet_count = 0;
+  std::uint32_t unoccupied_sync_packet_count = 0;
+  std::uint32_t marker_sync_packet_count = 0;
   std::uint32_t color = 0;
   bool active = false;
   bool npc = false;
   bool has_sync_state = false;
   bool has_vehicle_sync_state = false;
   bool has_passenger_sync_state = false;
+  bool has_aim_sync_state = false;
+  bool has_bullet_sync_state = false;
+  bool has_trailer_sync_state = false;
+  bool has_unoccupied_sync_state = false;
+  bool has_marker_sync_state = false;
   bool has_spawn_state = false;
   bool world_spawned = false;
 };
@@ -582,6 +644,11 @@ void HandleWorldPlayerAddRpc(RPCParameters *parameters) {
   player.has_sync_state = false;
   player.has_vehicle_sync_state = false;
   player.has_passenger_sync_state = false;
+  player.has_aim_sync_state = false;
+  player.has_bullet_sync_state = false;
+  player.has_trailer_sync_state = false;
+  player.has_unoccupied_sync_state = false;
+  player.has_marker_sync_state = false;
   samp::util::WriteLogNumber("network remote player spawn received", player_id);
 }
 
@@ -603,6 +670,11 @@ void HandleWorldPlayerRemoveRpc(RPCParameters *parameters) {
   player.has_sync_state = false;
   player.has_vehicle_sync_state = false;
   player.has_passenger_sync_state = false;
+  player.has_aim_sync_state = false;
+  player.has_bullet_sync_state = false;
+  player.has_trailer_sync_state = false;
+  player.has_unoccupied_sync_state = false;
+  player.has_marker_sync_state = false;
   samp::util::WriteLogNumber("network remote player despawn received", player_id);
 }
 
@@ -622,17 +694,13 @@ void HandleWorldPlayerDeathRpc(RPCParameters *parameters) {
   if (!player.active) {
     return;
   }
-  player.sync_state = {};
-  player.sync_state.special_action = 32;
   player.vehicle_sync_state = {};
   player.passenger_sync_state = {};
-  player.last_sync_time = 0;
   player.last_vehicle_sync_time = 0;
   player.last_passenger_sync_time = 0;
-  player.has_sync_state = false;
   player.has_vehicle_sync_state = false;
   player.has_passenger_sync_state = false;
-  samp::util::WriteLogNumber("network remote player death received", player_id);
+  samp::util::WriteLogNumber("network remote player left vehicle", player_id);
 }
 
 bool ReadRotationQuaternion(RakNet::BitStream &payload, std::array<float, 4> &rotation) {
@@ -779,6 +847,103 @@ bool ReadPassengerSyncState(RakNet::BitStream &payload, PassengerSyncState &stat
   return true;
 }
 
+bool ReadAimSyncState(RakNet::BitStream &payload, AimSyncState &state) {
+  std::array<std::uint8_t, 31> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    return false;
+  }
+  AimSyncState parsed;
+  parsed.camera_mode = bytes[0];
+  std::memcpy(parsed.aim_direction.data(), bytes.data() + 1, sizeof(parsed.aim_direction));
+  std::memcpy(parsed.aim_position.data(), bytes.data() + 13, sizeof(parsed.aim_position));
+  std::memcpy(&parsed.drunk_level, bytes.data() + 25, sizeof(parsed.drunk_level));
+  parsed.camera_weapon_state = bytes[29];
+  parsed.aspect_ratio = bytes[30];
+  state = parsed;
+  return true;
+}
+
+bool ReadBulletSyncState(RakNet::BitStream &payload, BulletSyncState &state) {
+  std::array<std::uint8_t, 40> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    return false;
+  }
+  BulletSyncState parsed;
+  parsed.hit_type = bytes[0];
+  std::memcpy(&parsed.hit_id, bytes.data() + 1, sizeof(parsed.hit_id));
+  std::memcpy(parsed.origin.data(), bytes.data() + 3, sizeof(parsed.origin));
+  std::memcpy(parsed.target.data(), bytes.data() + 15, sizeof(parsed.target));
+  std::memcpy(parsed.center.data(), bytes.data() + 27, sizeof(parsed.center));
+  parsed.weapon_id = bytes[39];
+  state = parsed;
+  return true;
+}
+
+bool ReadTrailerSyncState(RakNet::BitStream &payload, TrailerSyncState &state) {
+  std::array<std::uint8_t, 54> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    return false;
+  }
+  TrailerSyncState parsed;
+  std::memcpy(&parsed.trailer_id, bytes.data(), sizeof(parsed.trailer_id));
+  std::memcpy(parsed.matrix_position.data(), bytes.data() + 2,
+              sizeof(parsed.matrix_position));
+  std::memcpy(parsed.rotation_quaternion.data(), bytes.data() + 14,
+              sizeof(parsed.rotation_quaternion));
+  std::memcpy(parsed.position.data(), bytes.data() + 30, sizeof(parsed.position));
+  std::memcpy(parsed.rotation.data(), bytes.data() + 42, sizeof(parsed.rotation));
+  state = parsed;
+  return true;
+}
+
+bool IsUnitVector(const std::array<float, 3> &vector) {
+  for (float component : vector) {
+    if (!(component >= -1.0f && component <= 1.0f)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsValidSyncPosition(const std::array<float, 3> &position) {
+  return position[0] > -20000.0f && position[0] < 20000.0f &&
+         position[1] > -20000.0f && position[1] < 20000.0f &&
+         position[2] > -10000.0f && position[2] < 100000.0f;
+}
+
+bool IsSmallSyncVector(const std::array<float, 3> &vector) {
+  for (float component : vector) {
+    if (!(component > -100.0f && component < 100.0f)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ReadUnoccupiedSyncState(RakNet::BitStream &payload, UnoccupiedSyncState &state) {
+  std::array<std::uint8_t, 67> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    return false;
+  }
+  UnoccupiedSyncState parsed;
+  std::memcpy(&parsed.vehicle_id, bytes.data(), sizeof(parsed.vehicle_id));
+  parsed.seat_id = bytes[2];
+  std::memcpy(parsed.roll.data(), bytes.data() + 3, sizeof(parsed.roll));
+  std::memcpy(parsed.direction.data(), bytes.data() + 15, sizeof(parsed.direction));
+  std::memcpy(parsed.position.data(), bytes.data() + 27, sizeof(parsed.position));
+  std::memcpy(parsed.velocity.data(), bytes.data() + 39, sizeof(parsed.velocity));
+  std::memcpy(parsed.turn_speed.data(), bytes.data() + 51, sizeof(parsed.turn_speed));
+  std::memcpy(&parsed.vehicle_health, bytes.data() + 63, sizeof(parsed.vehicle_health));
+  if (parsed.vehicle_id == 0 || parsed.vehicle_id == 0xFFFF || parsed.vehicle_id >= 2000 ||
+      !IsUnitVector(parsed.roll) || !IsUnitVector(parsed.direction) ||
+      !IsValidSyncPosition(parsed.position) || !IsSmallSyncVector(parsed.velocity) ||
+      !IsSmallSyncVector(parsed.turn_speed)) {
+    return false;
+  }
+  state = parsed;
+  return true;
+}
+
 void HandlePlayerSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
   if (!g_client || g_client->state != NetworkState::Active || packet.length - offset < 3) {
     return;
@@ -869,6 +1034,177 @@ void HandlePassengerSyncPacket(Packet &packet, unsigned offset, std::uint32_t pa
   player.last_passenger_sync_time = packet_timestamp;
   player.has_passenger_sync_state = true;
   ++player.passenger_sync_packet_count;
+}
+
+void HandleAimSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
+  constexpr unsigned kAimSyncPacketSize = 1 + sizeof(std::uint16_t) + 31;
+  if (!g_client || g_client->state != NetworkState::Active ||
+      packet.length - offset < kAimSyncPacketSize) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_AIM_SYNC || !payload.Read(player_id) ||
+      player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  AimSyncState sync_state;
+  if (!ReadAimSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network aim sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_aim_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_aim_sync_time) < 0) {
+    return;
+  }
+  player.aim_sync_state = sync_state;
+  player.last_aim_sync_time = packet_timestamp;
+  player.has_aim_sync_state = true;
+  ++player.aim_sync_packet_count;
+}
+
+void HandleBulletSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
+  constexpr unsigned kBulletSyncPacketSize = 1 + sizeof(std::uint16_t) + 40;
+  if (!g_client || g_client->state != NetworkState::Active ||
+      packet.length - offset < kBulletSyncPacketSize) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_BULLET_SYNC || !payload.Read(player_id) ||
+      player_id >= 0x3EC || player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active || !player.world_spawned) {
+    return;
+  }
+  BulletSyncState sync_state;
+  if (!ReadBulletSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network bullet sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_bullet_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_bullet_sync_time) < 0) {
+    return;
+  }
+  player.bullet_sync_state = sync_state;
+  player.last_bullet_sync_time = packet_timestamp;
+  player.has_bullet_sync_state = true;
+  ++player.bullet_sync_packet_count;
+}
+
+void HandleTrailerSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
+  constexpr unsigned kTrailerSyncPacketSize = 1 + sizeof(std::uint16_t) + 54;
+  if (!g_client || g_client->state != NetworkState::Active ||
+      packet.length - offset < kTrailerSyncPacketSize) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_TRAILER_SYNC || !payload.Read(player_id) ||
+      player_id > 0x3EC || player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  TrailerSyncState sync_state;
+  if (!ReadTrailerSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network trailer sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_trailer_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_trailer_sync_time) < 0) {
+    return;
+  }
+  player.trailer_sync_state = sync_state;
+  player.last_trailer_sync_time = packet_timestamp;
+  player.has_trailer_sync_state = true;
+  ++player.trailer_sync_packet_count;
+}
+
+void HandleUnoccupiedSyncPacket(Packet &packet, unsigned offset,
+                                std::uint32_t packet_timestamp) {
+  constexpr unsigned kUnoccupiedSyncPacketSize = 1 + sizeof(std::uint16_t) + 67;
+  if (!g_client || g_client->state != NetworkState::Active ||
+      packet.length - offset < kUnoccupiedSyncPacketSize) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_UNOCCUPIED_SYNC || !payload.Read(player_id) ||
+      player_id > 0x3EC || player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  UnoccupiedSyncState sync_state;
+  if (!ReadUnoccupiedSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network unoccupied sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_unoccupied_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_unoccupied_sync_time) < 0) {
+    return;
+  }
+  player.unoccupied_sync_state = sync_state;
+  player.last_unoccupied_sync_time = packet_timestamp;
+  player.has_unoccupied_sync_state = true;
+  ++player.unoccupied_sync_packet_count;
+}
+
+void HandleMarkersSyncPacket(Packet &packet, unsigned offset,
+                             std::uint32_t packet_timestamp) {
+  if (!g_client || g_client->state != NetworkState::Active || packet.length - offset < 5) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint32_t marker_count = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_MARKERS_SYNC || !payload.Read(marker_count) ||
+      marker_count > g_client->remote_players.size()) {
+    samp::util::WriteLogLine("network markers sync packet rejected: invalid header");
+    return;
+  }
+  bool previous_marker_state = packet_id != 0;
+  for (std::uint32_t index = 0; index < marker_count; ++index) {
+    std::uint16_t player_id = 0;
+    bool has_marker = previous_marker_state;
+    MarkerSyncState marker_state;
+    if (!payload.Read(player_id) ||
+        (payload.GetNumberOfUnreadBits() > 0 && !payload.Read(has_marker)) ||
+        (has_marker && (!payload.Read(marker_state.position[0]) ||
+                        !payload.Read(marker_state.position[1]) ||
+                        !payload.Read(marker_state.position[2])))) {
+      samp::util::WriteLogLine("network markers sync packet rejected: truncated entry");
+      return;
+    }
+    previous_marker_state = has_marker;
+    if (player_id >= 0x3EC || player_id >= g_client->remote_players.size()) {
+      continue;
+    }
+    RemotePlayer &player = g_client->remote_players[player_id];
+    if (!player.active) {
+      continue;
+    }
+    marker_state.has_marker = has_marker;
+    marker_state.timestamp = packet_timestamp;
+    player.marker_sync_state = marker_state;
+    player.has_marker_sync_state = true;
+    ++player.marker_sync_packet_count;
+  }
 }
 
 }
@@ -993,6 +1329,21 @@ void PumpNetworkClient() {
           break;
         case ID_PASSENGER_SYNC:
           HandlePassengerSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_AIM_SYNC:
+          HandleAimSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_BULLET_SYNC:
+          HandleBulletSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_TRAILER_SYNC:
+          HandleTrailerSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_UNOCCUPIED_SYNC:
+          HandleUnoccupiedSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_MARKERS_SYNC:
+          HandleMarkersSyncPacket(*packet, offset, packet_timestamp);
           break;
         default:
           break;
