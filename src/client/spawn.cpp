@@ -82,4 +82,8 @@ void SetSpawnViewZoom() {
   InvokeViewZoom(BitsToFloat(0x43C00000), BitsToFloat(0xC4C2A000), BitsToFloat(0x41A00000), 2);
 }
 
+void ApplyServerWeather(int weather) {
+  SetSpawnWeather(weather);
+}
+
 }  // namespace samp::client

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace samp::client {
 
@@ -19,5 +20,7 @@ void CopySecurityBlock(std::array<std::uint32_t, 4> &destination, const std::uin
 bool DecryptSecurityBlocks(std::array<std::uint32_t, 4> &state, std::uint32_t initial_sum,
                            std::uint32_t delta, std::uint32_t rounds, std::uint8_t *data,
                            std::size_t size);
+bool CaptureGameHardwareState();
+bool GenerateHardwareId(const char *server_auth_key, std::string &hardware_id);
 
 }

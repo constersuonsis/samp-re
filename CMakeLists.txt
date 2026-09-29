@@ -60,7 +60,7 @@ add_library(samp_client STATIC
 )
 
 target_include_directories(samp_client PUBLIC include)
-target_link_libraries(samp_client PUBLIC raknet winmm)
+target_link_libraries(samp_client PUBLIC raknet winmm advapi32)
 
 if(MSVC)
     target_compile_options(samp_client PRIVATE /W4)

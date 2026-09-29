@@ -5,6 +5,7 @@
 #include "samp/game/patches.h"
 #include "samp/game/anticheat.h"
 #include "samp/game/version.h"
+#include "samp/client/security_archive.h"
 #include "samp/player/player_colors.h"
 #include "samp/scripting/command_manager.h"
 #include "samp/util/logger.h"
@@ -86,6 +87,9 @@ void InitWeaponModels() {
 }
 
 void FinalizeGameInit() {
+  samp::util::WriteLogLine(samp::client::CaptureGameHardwareState()
+                               ? "hardware fingerprint source captured"
+                               : "hardware fingerprint source capture failed");
   ApplyAllPatches();
   samp::util::WriteLogLine("game patches applied");
   PatchGameHooks();

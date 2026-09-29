@@ -4,6 +4,10 @@
 #include "RakClientInterface.h"
 #include "RakNetworkFactory.h"
 #include "SHA1.h"
+#include "samp/client/security_archive.h"
+#include "samp/client/spawn.h"
+#include "samp/game/memory.h"
+#include "samp/util/logger.h"
 
 #include <windows.h>
 
@@ -12,6 +16,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace samp::client {
 namespace {
@@ -20,6 +25,16 @@ enum class NetworkState {
   Connecting = 1,
   WaitingForResponse = 2,
   JoiningGame = 6
+};
+
+struct ServerGameSettings {
+  std::array<bool, 11> flags{};
+  std::array<std::uint32_t, 11> values{};
+  std::uint16_t player_id = 0;
+  std::array<std::uint8_t, 2> byte_values{};
+  std::string hostname;
+  std::array<char, 212> model_data{};
+  std::uint32_t final_value = 0;
 };
 
 struct ClientDeleter {
@@ -40,10 +55,17 @@ struct NetworkClient {
   DWORD last_attempt = 0;
   std::uint32_t server_challenge = 0;
   std::string server_auth_key;
+  ServerGameSettings server_game_settings;
+  bool has_server_game_settings = false;
   NetworkState state = NetworkState::Connecting;
 };
 
 std::unique_ptr<NetworkClient> g_client;
+int g_init_game_rpc_id = 139;
+int g_connection_rejected_rpc_id = 130;
+constexpr std::size_t kStuntBonusFlagIndex = 4;
+constexpr std::size_t kGravityValueIndex = 4;
+constexpr std::size_t kWeatherValueIndex = 1;
 
 bool ReadConnectionAcceptance(Packet &packet, unsigned offset,
                               std::uint32_t &server_challenge) {
@@ -183,6 +205,114 @@ bool SendJoinRequest(NetworkClient &client) {
                           UNASSIGNED_NETWORK_ID, nullptr);
 }
 
+bool SendAuthenticationKeyResponse(NetworkClient &client, const std::string &server_auth_key) {
+  std::string hardware_id;
+  if (!GenerateHardwareId(server_auth_key.c_str(), hardware_id) || hardware_id.size() > 255) {
+    return false;
+  }
+  RakNet::BitStream payload;
+  payload.Write(static_cast<unsigned char>(ID_AUTH_KEY));
+  payload.Write(static_cast<unsigned char>(hardware_id.size()));
+  payload.Write(hardware_id.data(), static_cast<int>(hardware_id.size()));
+  return client.peer->Send(&payload, SYSTEM_PRIORITY, RELIABLE, 0);
+}
+
+bool ReadServerGameSettings(RakNet::BitStream &payload, ServerGameSettings &settings) {
+  ServerGameSettings parsed;
+  std::size_t flag_index = 0;
+  std::size_t value_index = 0;
+  auto read_flag = [&]() {
+    return flag_index < parsed.flags.size() && payload.Read(parsed.flags[flag_index++]);
+  };
+  auto read_value = [&]() {
+    return value_index < parsed.values.size() && payload.Read(parsed.values[value_index++]);
+  };
+
+  if (!read_flag() || !read_flag() || !read_flag() || !read_flag() || !read_value() ||
+      !read_flag() || !read_value() || !read_flag() || !read_flag() || !read_flag() ||
+      !read_value() || !payload.Read(parsed.player_id) || !read_flag() ||
+      !read_value() || !payload.Read(parsed.byte_values[0]) || !payload.Read(parsed.byte_values[1]) ||
+      !read_value() || !read_flag() || !read_value() || !read_flag()) {
+    return false;
+  }
+
+  for (std::size_t index = 0; index < 5; ++index) {
+    if (!read_value()) {
+      return false;
+    }
+  }
+
+  std::uint8_t hostname_length = 0;
+  if (!payload.Read(hostname_length)) {
+    return false;
+  }
+  const std::size_t required_bits =
+      (static_cast<std::size_t>(hostname_length) + parsed.model_data.size() + sizeof(parsed.final_value)) * 8;
+  if (static_cast<std::size_t>(payload.GetNumberOfUnreadBits()) < required_bits) {
+    return false;
+  }
+  parsed.hostname.resize(hostname_length);
+  if ((hostname_length != 0 && !payload.Read(parsed.hostname.data(), hostname_length)) ||
+      !payload.Read(parsed.model_data.data(), static_cast<int>(parsed.model_data.size())) ||
+      !payload.Read(parsed.final_value)) {
+    return false;
+  }
+  settings = std::move(parsed);
+  return true;
+}
+
+void ApplyServerGameOptions(const ServerGameSettings &settings) {
+  samp::game::WriteByte(reinterpret_cast<void *>(0xA4A474),
+                        settings.flags[kStuntBonusFlagIndex] ? 1 : 0);
+  samp::game::WriteDword(reinterpret_cast<void *>(0x863984), settings.values[kGravityValueIndex]);
+  ApplyServerWeather(settings.byte_values[kWeatherValueIndex]);
+}
+
+void HandleInitGameRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input) {
+    return;
+  }
+  const unsigned int payload_size = (parameters->numberOfBitsOfData + 7) / 8;
+  RakNet::BitStream payload(parameters->input, payload_size, false);
+  if (!ReadServerGameSettings(payload, g_client->server_game_settings)) {
+    samp::util::WriteLogLine("network InitGame RPC rejected: truncated or invalid payload");
+    return;
+  }
+  g_client->has_server_game_settings = true;
+  ApplyServerGameOptions(g_client->server_game_settings);
+  samp::util::WriteLogLine("network InitGame options applied; world initialization is pending");
+}
+
+void HandleConnectionRejectedRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 8) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  unsigned char reason = 0;
+  if (!payload.Read(reason)) {
+    return;
+  }
+  switch (reason) {
+    case 1:
+      samp::util::WriteLogLine("network connection rejected: incorrect version");
+      break;
+    case 2:
+      samp::util::WriteLogLine("network connection rejected: unacceptable nickname");
+      samp::util::WriteLogLine("network nickname must be 3-20 alphanumeric characters");
+      break;
+    case 3:
+      samp::util::WriteLogLine("network connection rejected: incompatible client version");
+      break;
+    case 4:
+      samp::util::WriteLogLine("network connection rejected: no player slot available");
+      break;
+    default:
+      samp::util::WriteLogNumber("network connection rejected: unknown reason", reason);
+      break;
+  }
+  g_client->peer->Disconnect(500);
+}
+
 }
 
 bool CreateNetworkClient(const char *host, unsigned short port, const char *name,
@@ -204,6 +334,9 @@ bool CreateNetworkClient(const char *host, unsigned short port, const char *name
   client->port = port;
   client->last_attempt = ::GetTickCount();
   client->peer->SetPassword(client->password.c_str());
+  client->peer->RegisterAsRemoteProcedureCall(&g_init_game_rpc_id, &HandleInitGameRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_connection_rejected_rpc_id,
+                                               &HandleConnectionRejectedRpc);
   g_client = std::move(client);
   return true;
 }
@@ -242,7 +375,14 @@ void PumpNetworkClient() {
     if (packet->length > offset) {
       switch (packet->data[offset]) {
         case ID_AUTH_KEY:
-          ReadAuthenticationKey(*packet, offset, g_client->server_auth_key);
+          if (ReadAuthenticationKey(*packet, offset, g_client->server_auth_key)) {
+            samp::util::WriteLogLine(
+                SendAuthenticationKeyResponse(*g_client, g_client->server_auth_key)
+                    ? "network auth response sent"
+                    : "network auth response generation or send failed");
+          } else {
+            samp::util::WriteLogLine("network auth key packet rejected");
+          }
           break;
         case ID_CONNECTION_REQUEST_ACCEPTED:
           if (g_client->state != NetworkState::JoiningGame &&
@@ -250,14 +390,26 @@ void PumpNetworkClient() {
             SendJoinRequest(*g_client);
           }
           break;
-        case ID_DISCONNECTION_NOTIFICATION:
-        case ID_CONNECTION_LOST:
-        case ID_NO_FREE_INCOMING_CONNECTIONS:
         case ID_CONNECTION_ATTEMPT_FAILED:
-        case ID_CONNECTION_BANNED:
-        case ID_INVALID_PASSWORD:
+        case ID_NO_FREE_INCOMING_CONNECTIONS:
           g_client->state = NetworkState::Connecting;
-          g_client->last_attempt = ::GetTickCount();
+          break;
+        case ID_CONNECTION_LOST:
+          peer.Disconnect(0);
+          g_client->state = NetworkState::Connecting;
+          break;
+        case ID_DISCONNECTION_NOTIFICATION:
+          peer.Disconnect(2000);
+          break;
+        case ID_CONNECTION_BANNED:
+          samp::util::WriteLogLine("network connection rejected: banned");
+          break;
+        case ID_INVALID_PASSWORD:
+          samp::util::WriteLogLine("network connection rejected: invalid password");
+          peer.Disconnect(0);
+          break;
+        case ID_RSA_PUBLIC_KEY_MISMATCH:
+          samp::util::WriteLogLine("network connection rejected: RSA key mismatch");
           break;
         default:
           break;
