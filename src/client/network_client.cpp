@@ -6,6 +6,7 @@
 #include "SHA1.h"
 #include "samp/client/security_archive.h"
 #include "samp/client/spawn.h"
+#include "samp/client/tick.h"
 #include "samp/game/memory.h"
 #include "samp/util/logger.h"
 
@@ -34,6 +35,7 @@ struct ServerGameSettings {
   std::array<std::uint32_t, 11> values{};
   std::uint16_t player_id = 0;
   std::array<std::uint8_t, 2> byte_values{};
+  std::uint8_t player_time_minute = 0;
   std::string hostname;
   std::array<char, kServerModelBlockSize> model_data{};
   std::array<bool, kServerModelBlockSize> loaded_models{};
@@ -76,6 +78,18 @@ struct VehicleSyncState {
   bool has_landing_gear = false;
 };
 
+struct PassengerSyncState {
+  std::uint16_t vehicle_id = 0;
+  std::uint8_t seat_flags = 0;
+  std::uint8_t special_action = 0;
+  std::uint8_t health = 0;
+  std::uint8_t armor = 0;
+  std::uint16_t left_right_analog = 0;
+  std::uint16_t up_down_analog = 0;
+  std::uint16_t keys = 0;
+  std::array<float, 3> position{};
+};
+
 struct RemotePlayerSpawnState {
   std::uint8_t skin_id = 0xFF;
   std::uint8_t special_action = 4;
@@ -90,16 +104,20 @@ struct RemotePlayer {
   std::array<char, 25> name{};
   PlayerSyncState sync_state{};
   VehicleSyncState vehicle_sync_state{};
+  PassengerSyncState passenger_sync_state{};
   RemotePlayerSpawnState spawn_state{};
   std::uint32_t last_sync_time = 0;
   std::uint32_t last_vehicle_sync_time = 0;
+  std::uint32_t last_passenger_sync_time = 0;
   std::uint32_t sync_packet_count = 0;
   std::uint32_t vehicle_sync_packet_count = 0;
+  std::uint32_t passenger_sync_packet_count = 0;
   std::uint32_t color = 0;
   bool active = false;
   bool npc = false;
   bool has_sync_state = false;
   bool has_vehicle_sync_state = false;
+  bool has_passenger_sync_state = false;
   bool has_spawn_state = false;
   bool world_spawned = false;
 };
@@ -135,10 +153,14 @@ int g_client_message_rpc_id = 93;
 int g_server_join_rpc_id = 137;
 int g_server_quit_rpc_id = 138;
 int g_server_weather_rpc_id = 152;
+int g_server_player_time_rpc_id = 29;
+int g_server_world_time_rpc_id = 94;
 int g_world_player_add_rpc_id = 32;
+int g_world_player_death_rpc_id = 166;
 int g_world_player_remove_rpc_id = 163;
 constexpr std::size_t kStuntBonusFlagIndex = 4;
 constexpr std::size_t kGravityValueIndex = 4;
+constexpr std::size_t kWorldHourValueIndex = 0;
 constexpr std::size_t kWeatherValueIndex = 1;
 
 bool ReadConnectionAcceptance(Packet &packet, unsigned offset,
@@ -467,11 +489,15 @@ void HandleServerQuitRpc(RPCParameters *parameters) {
     samp::util::WriteLogLine("network server quit RPC rejected: invalid payload");
     return;
   }
-  if (player_id >= g_client->remote_players.size()) {
+  if (player_id >= 0x3EC || player_id >= g_client->remote_players.size()) {
     samp::util::WriteLogNumber("network server quit RPC rejected: invalid player id", player_id);
     return;
   }
-  g_client->remote_players[player_id] = {};
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  player = {};
   samp::util::WriteLogNumber("network remote player left", player_id);
   samp::util::WriteLogNumber("network remote player quit reason", reason);
 }
@@ -489,6 +515,38 @@ void HandleServerWeatherRpc(RPCParameters *parameters) {
   g_client->server_game_settings.byte_values[kWeatherValueIndex] = weather;
   ApplyServerWeather(weather);
   samp::util::WriteLogNumber("network server weather updated", weather);
+}
+
+void HandleServerWorldTimeRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 8) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint8_t hour = 0;
+  if (!payload.Read(hour)) {
+    samp::util::WriteLogLine("network world time RPC rejected: invalid payload");
+    return;
+  }
+  g_client->server_game_settings.byte_values[kWorldHourValueIndex] = hour;
+  samp::util::WriteLogNumber("network world hour updated", hour);
+}
+
+void HandleServerPlayerTimeRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 16) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint8_t hour = 0;
+  std::uint8_t minute = 0;
+  if (!payload.Read(hour) || !payload.Read(minute)) {
+    samp::util::WriteLogLine("network player time RPC rejected: invalid payload");
+    return;
+  }
+  g_client->server_game_settings.byte_values[kWorldHourValueIndex] = hour;
+  g_client->server_game_settings.player_time_minute = minute;
+  SyncTimeOfDay(hour, minute);
+  samp::util::WriteLogNumber("network player hour updated", hour);
+  samp::util::WriteLogNumber("network player minute updated", minute);
 }
 
 void HandleWorldPlayerAddRpc(RPCParameters *parameters) {
@@ -523,6 +581,7 @@ void HandleWorldPlayerAddRpc(RPCParameters *parameters) {
   player.world_spawned = true;
   player.has_sync_state = false;
   player.has_vehicle_sync_state = false;
+  player.has_passenger_sync_state = false;
   samp::util::WriteLogNumber("network remote player spawn received", player_id);
 }
 
@@ -543,7 +602,37 @@ void HandleWorldPlayerRemoveRpc(RPCParameters *parameters) {
   player.has_spawn_state = false;
   player.has_sync_state = false;
   player.has_vehicle_sync_state = false;
+  player.has_passenger_sync_state = false;
   samp::util::WriteLogNumber("network remote player despawn received", player_id);
+}
+
+void HandleWorldPlayerDeathRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 16) {
+    samp::util::WriteLogLine("network world player death RPC rejected: truncated payload");
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint16_t player_id = 0;
+  if (!payload.Read(player_id) || player_id > 0x3EC ||
+      player_id >= g_client->remote_players.size()) {
+    samp::util::WriteLogLine("network world player death RPC rejected: invalid player id");
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  player.sync_state = {};
+  player.sync_state.special_action = 32;
+  player.vehicle_sync_state = {};
+  player.passenger_sync_state = {};
+  player.last_sync_time = 0;
+  player.last_vehicle_sync_time = 0;
+  player.last_passenger_sync_time = 0;
+  player.has_sync_state = false;
+  player.has_vehicle_sync_state = false;
+  player.has_passenger_sync_state = false;
+  samp::util::WriteLogNumber("network remote player death received", player_id);
 }
 
 bool ReadRotationQuaternion(RakNet::BitStream &payload, std::array<float, 4> &rotation) {
@@ -671,6 +760,25 @@ bool ReadVehicleSyncState(RakNet::BitStream &payload, VehicleSyncState &state) {
   return true;
 }
 
+bool ReadPassengerSyncState(RakNet::BitStream &payload, PassengerSyncState &state) {
+  std::array<std::uint8_t, 24> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    return false;
+  }
+  PassengerSyncState parsed;
+  std::memcpy(&parsed.vehicle_id, bytes.data(), sizeof(parsed.vehicle_id));
+  parsed.seat_flags = bytes[2];
+  parsed.special_action = bytes[3] & 0x3F;
+  parsed.health = bytes[4];
+  parsed.armor = bytes[5];
+  std::memcpy(&parsed.left_right_analog, bytes.data() + 6, sizeof(parsed.left_right_analog));
+  std::memcpy(&parsed.up_down_analog, bytes.data() + 8, sizeof(parsed.up_down_analog));
+  std::memcpy(&parsed.keys, bytes.data() + 10, sizeof(parsed.keys));
+  std::memcpy(parsed.position.data(), bytes.data() + 12, sizeof(parsed.position));
+  state = parsed;
+  return true;
+}
+
 void HandlePlayerSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
   if (!g_client || g_client->state != NetworkState::Active || packet.length - offset < 3) {
     return;
@@ -731,6 +839,38 @@ void HandleVehicleSyncPacket(Packet &packet, unsigned offset, std::uint32_t pack
   ++player.vehicle_sync_packet_count;
 }
 
+void HandlePassengerSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
+  constexpr unsigned kPassengerSyncPacketSize = 1 + sizeof(std::uint16_t) + 24;
+  if (!g_client || g_client->state != NetworkState::Active ||
+      packet.length - offset < kPassengerSyncPacketSize) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_PASSENGER_SYNC || !payload.Read(player_id) ||
+      player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  PassengerSyncState sync_state;
+  if (!ReadPassengerSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network passenger sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_passenger_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_passenger_sync_time) < 0) {
+    return;
+  }
+  player.passenger_sync_state = sync_state;
+  player.last_passenger_sync_time = packet_timestamp;
+  player.has_passenger_sync_state = true;
+  ++player.passenger_sync_packet_count;
+}
+
 }
 
 bool CreateNetworkClient(const char *host, unsigned short port, const char *name,
@@ -759,8 +899,14 @@ bool CreateNetworkClient(const char *host, unsigned short port, const char *name
   client->peer->RegisterAsRemoteProcedureCall(&g_server_join_rpc_id, &HandleServerJoinRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_quit_rpc_id, &HandleServerQuitRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_weather_rpc_id, &HandleServerWeatherRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_player_time_rpc_id,
+                                               &HandleServerPlayerTimeRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_world_time_rpc_id,
+                                               &HandleServerWorldTimeRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_world_player_add_rpc_id,
                                                &HandleWorldPlayerAddRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_world_player_death_rpc_id,
+                                               &HandleWorldPlayerDeathRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_world_player_remove_rpc_id,
                                                &HandleWorldPlayerRemoveRpc);
   g_client = std::move(client);
@@ -844,6 +990,9 @@ void PumpNetworkClient() {
           break;
         case ID_VEHICLE_SYNC:
           HandleVehicleSyncPacket(*packet, offset, packet_timestamp);
+          break;
+        case ID_PASSENGER_SYNC:
+          HandlePassengerSyncPacket(*packet, offset, packet_timestamp);
           break;
         default:
           break;
