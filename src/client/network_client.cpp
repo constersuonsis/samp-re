@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -24,6 +25,7 @@ namespace {
 enum class NetworkState {
   Connecting = 1,
   WaitingForResponse = 2,
+  Active = 5,
   JoiningGame = 6
 };
 
@@ -33,8 +35,38 @@ struct ServerGameSettings {
   std::uint16_t player_id = 0;
   std::array<std::uint8_t, 2> byte_values{};
   std::string hostname;
-  std::array<char, 212> model_data{};
+  std::array<char, kServerModelBlockSize> model_data{};
+  std::array<bool, kServerModelBlockSize> loaded_models{};
   std::uint32_t final_value = 0;
+};
+
+struct PlayerSyncState {
+  std::uint16_t left_right_analog = 0;
+  std::uint16_t up_down_analog = 0;
+  std::uint16_t keys = 0;
+  std::array<float, 3> position{};
+  std::array<float, 4> rotation{};
+  std::uint8_t health = 0;
+  std::uint8_t armor = 0;
+  std::uint8_t special_action = 0;
+  std::uint8_t weapon = 0;
+  std::array<float, 3> velocity{};
+  std::uint16_t surfing_vehicle = 0xFFFF;
+  std::array<float, 3> surfing_offset{};
+  std::uint32_t animation_flags = 0;
+  bool has_surfing = false;
+  bool has_animation = false;
+};
+
+struct RemotePlayer {
+  std::array<char, 25> name{};
+  PlayerSyncState sync_state{};
+  std::uint32_t last_sync_time = 0;
+  std::uint32_t sync_packet_count = 0;
+  std::uint32_t color = 0;
+  bool active = false;
+  bool npc = false;
+  bool has_sync_state = false;
 };
 
 struct ClientDeleter {
@@ -56,6 +88,7 @@ struct NetworkClient {
   std::uint32_t server_challenge = 0;
   std::string server_auth_key;
   ServerGameSettings server_game_settings;
+  std::array<RemotePlayer, 1005> remote_players{};
   bool has_server_game_settings = false;
   NetworkState state = NetworkState::Connecting;
 };
@@ -63,6 +96,9 @@ struct NetworkClient {
 std::unique_ptr<NetworkClient> g_client;
 int g_init_game_rpc_id = 139;
 int g_connection_rejected_rpc_id = 130;
+int g_client_message_rpc_id = 93;
+int g_server_join_rpc_id = 137;
+int g_server_quit_rpc_id = 138;
 constexpr std::size_t kStuntBonusFlagIndex = 4;
 constexpr std::size_t kGravityValueIndex = 4;
 constexpr std::size_t kWeatherValueIndex = 1;
@@ -217,7 +253,8 @@ bool SendAuthenticationKeyResponse(NetworkClient &client, const std::string &ser
   return client.peer->Send(&payload, SYSTEM_PRIORITY, RELIABLE, 0);
 }
 
-bool ReadServerGameSettings(RakNet::BitStream &payload, ServerGameSettings &settings) {
+bool ReadServerGameSettings(RakNet::BitStream &payload, unsigned int payload_bits,
+                            ServerGameSettings &settings) {
   ServerGameSettings parsed;
   std::size_t flag_index = 0;
   std::size_t value_index = 0;
@@ -244,6 +281,14 @@ bool ReadServerGameSettings(RakNet::BitStream &payload, ServerGameSettings &sett
 
   std::uint8_t hostname_length = 0;
   if (!payload.Read(hostname_length)) {
+    return false;
+  }
+  const std::size_t required_payload_bits =
+      parsed.flags.size() + parsed.values.size() * 32 + sizeof(parsed.player_id) * 8 +
+      parsed.byte_values.size() * 8 + sizeof(hostname_length) * 8 +
+      static_cast<std::size_t>(hostname_length) * 8 + parsed.model_data.size() * 8 +
+      sizeof(parsed.final_value) * 8;
+  if (static_cast<std::size_t>(payload_bits) < required_payload_bits) {
     return false;
   }
   const std::size_t required_bits =
@@ -274,13 +319,19 @@ void HandleInitGameRpc(RPCParameters *parameters) {
   }
   const unsigned int payload_size = (parameters->numberOfBitsOfData + 7) / 8;
   RakNet::BitStream payload(parameters->input, payload_size, false);
-  if (!ReadServerGameSettings(payload, g_client->server_game_settings)) {
+  if (!ReadServerGameSettings(payload, parameters->numberOfBitsOfData,
+                              g_client->server_game_settings)) {
     samp::util::WriteLogLine("network InitGame RPC rejected: truncated or invalid payload");
     return;
   }
   g_client->has_server_game_settings = true;
+  const std::size_t requested_models = ApplyServerModelSettings(
+      g_client->server_game_settings.model_data, g_client->server_game_settings.loaded_models);
   ApplyServerGameOptions(g_client->server_game_settings);
-  samp::util::WriteLogLine("network InitGame options applied; world initialization is pending");
+  samp::util::WriteLogNumber("network server models requested",
+                             static_cast<unsigned>(requested_models));
+  g_client->state = NetworkState::Active;
+  samp::util::WriteLogLine("network InitGame completed; client state is active");
 }
 
 void HandleConnectionRejectedRpc(RPCParameters *parameters) {
@@ -313,6 +364,207 @@ void HandleConnectionRejectedRpc(RPCParameters *parameters) {
   g_client->peer->Disconnect(500);
 }
 
+void HandleClientMessageRpc(RPCParameters *parameters) {
+  if (!parameters || !parameters->input || parameters->numberOfBitsOfData < 64) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint32_t color = 0;
+  std::uint32_t message_length = 0;
+  if (!payload.Read(color) || !payload.Read(message_length) || message_length > 255 ||
+      payload.GetNumberOfUnreadBits() < static_cast<int>(message_length * 8)) {
+    samp::util::WriteLogLine("network client message RPC rejected: invalid payload");
+    return;
+  }
+  std::array<char, 256> message{};
+  if (message_length != 0 && !payload.Read(message.data(), static_cast<int>(message_length))) {
+    samp::util::WriteLogLine("network client message RPC rejected: truncated text");
+    return;
+  }
+  samp::util::WriteLogNumber("network client message color", color);
+  samp::util::WriteLogValue("network client message", message.data());
+}
+
+void HandleServerJoinRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 48) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint16_t player_id = 0;
+  std::uint32_t color = 0;
+  std::uint8_t npc_flag = 0;
+  std::uint8_t name_length = 0;
+  if (!payload.Read(player_id) || !payload.Read(color) || !payload.Read(npc_flag) ||
+      !payload.Read(name_length) || payload.GetNumberOfUnreadBits() < static_cast<int>(name_length * 8)) {
+    samp::util::WriteLogLine("network server join RPC rejected: invalid payload");
+    return;
+  }
+  std::array<char, 256> name{};
+  if (name_length != 0 && !payload.Read(name.data(), name_length)) {
+    samp::util::WriteLogLine("network server join RPC rejected: truncated name");
+    return;
+  }
+  if (player_id >= g_client->remote_players.size() || std::strlen(name.data()) > 24) {
+    samp::util::WriteLogLine("network server join RPC rejected: player id or name is invalid");
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  player.name.fill(0);
+  std::memcpy(player.name.data(), name.data(), std::strlen(name.data()));
+  player.color = color;
+  player.active = true;
+  player.npc = npc_flag != 0;
+  samp::util::WriteLogNumber("network remote player joined", player_id);
+  samp::util::WriteLogValue("network remote player name", player.name.data());
+}
+
+void HandleServerQuitRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 24) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint16_t player_id = 0;
+  std::uint8_t reason = 0;
+  if (!payload.Read(player_id) || !payload.Read(reason)) {
+    samp::util::WriteLogLine("network server quit RPC rejected: invalid payload");
+    return;
+  }
+  if (player_id >= g_client->remote_players.size()) {
+    samp::util::WriteLogNumber("network server quit RPC rejected: invalid player id", player_id);
+    return;
+  }
+  g_client->remote_players[player_id] = {};
+  samp::util::WriteLogNumber("network remote player left", player_id);
+  samp::util::WriteLogNumber("network remote player quit reason", reason);
+}
+
+bool ReadRotationQuaternion(RakNet::BitStream &payload, std::array<float, 4> &rotation) {
+  bool negative_w = false;
+  bool negative_x = false;
+  bool negative_y = false;
+  bool negative_z = false;
+  std::uint16_t encoded_x = 0;
+  std::uint16_t encoded_y = 0;
+  std::uint16_t encoded_z = 0;
+  if (!payload.Read(negative_w) || !payload.Read(negative_x) || !payload.Read(negative_y) ||
+      !payload.Read(negative_z) || !payload.Read(encoded_x) || !payload.Read(encoded_y) ||
+      !payload.Read(encoded_z)) {
+    return false;
+  }
+  constexpr double kQuaternionScale = 0.00001525902189669642;
+  rotation[1] = static_cast<float>(encoded_x * kQuaternionScale);
+  rotation[2] = static_cast<float>(encoded_y * kQuaternionScale);
+  rotation[3] = static_cast<float>(encoded_z * kQuaternionScale);
+  if (negative_x) {
+    rotation[1] = -rotation[1];
+  }
+  if (negative_y) {
+    rotation[2] = -rotation[2];
+  }
+  if (negative_z) {
+    rotation[3] = -rotation[3];
+  }
+  float remaining = 1.0f - rotation[1] * rotation[1] - rotation[2] * rotation[2] -
+                    rotation[3] * rotation[3];
+  if (remaining < 0.0f) {
+    remaining = 0.0f;
+  }
+  rotation[0] = std::sqrt(remaining);
+  if (negative_w) {
+    rotation[0] = -rotation[0];
+  }
+  return true;
+}
+
+bool ReadPlayerVelocity(RakNet::BitStream &payload, std::array<float, 3> &velocity) {
+  float magnitude = 0.0f;
+  if (!payload.Read(magnitude)) {
+    return false;
+  }
+  if (magnitude <= 0.00001f) {
+    velocity.fill(0.0f);
+    return true;
+  }
+  for (float &component : velocity) {
+    std::uint16_t encoded_component = 0;
+    if (!payload.Read(encoded_component)) {
+      return false;
+    }
+    component = static_cast<float>(magnitude * (encoded_component * 0.000030518044 - 1.0));
+  }
+  return true;
+}
+
+bool ReadPlayerSyncState(RakNet::BitStream &payload, PlayerSyncState &state) {
+  PlayerSyncState parsed;
+  bool has_left_right_analog = false;
+  bool has_up_down_analog = false;
+  if (!payload.Read(has_left_right_analog) ||
+      (has_left_right_analog && !payload.Read(parsed.left_right_analog)) ||
+      !payload.Read(has_up_down_analog) ||
+      (has_up_down_analog && !payload.Read(parsed.up_down_analog)) ||
+      !payload.Read(parsed.keys) ||
+      !payload.Read(reinterpret_cast<char *>(parsed.position.data()), 12) ||
+      !ReadRotationQuaternion(payload, parsed.rotation)) {
+    return false;
+  }
+  std::uint8_t health_armor = 0;
+  std::uint8_t special_action = 0;
+  if (!payload.Read(health_armor) || !payload.Read(special_action) ||
+      !payload.Read(parsed.weapon) || !ReadPlayerVelocity(payload, parsed.velocity)) {
+    return false;
+  }
+  parsed.health = (health_armor & 0x0F) == 0x0F ? 100 : (health_armor & 0x0F) * 7;
+  parsed.armor = (health_armor >> 4) == 0x0F ? 100 : (health_armor >> 4) * 7;
+  parsed.special_action = special_action & 0x3F;
+  if (!payload.Read(parsed.has_surfing)) {
+    return false;
+  }
+  if (parsed.has_surfing &&
+      (!payload.Read(parsed.surfing_vehicle) ||
+       !payload.Read(reinterpret_cast<char *>(parsed.surfing_offset.data()), 12))) {
+    return false;
+  }
+  if (!payload.Read(parsed.has_animation)) {
+    return false;
+  }
+  if (parsed.has_animation && !payload.Read(parsed.animation_flags)) {
+    return false;
+  }
+  state = parsed;
+  return true;
+}
+
+void HandlePlayerSyncPacket(Packet &packet, unsigned offset, std::uint32_t packet_timestamp) {
+  if (!g_client || g_client->state != NetworkState::Active || packet.length - offset < 3) {
+    return;
+  }
+  RakNet::BitStream payload(packet.data + offset, packet.length - offset, false);
+  unsigned char packet_id = 0;
+  std::uint16_t player_id = 0;
+  if (!payload.Read(packet_id) || packet_id != ID_PLAYER_SYNC || !payload.Read(player_id) ||
+      player_id >= g_client->remote_players.size()) {
+    return;
+  }
+  RemotePlayer &player = g_client->remote_players[player_id];
+  if (!player.active) {
+    return;
+  }
+  PlayerSyncState sync_state;
+  if (!ReadPlayerSyncState(payload, sync_state)) {
+    samp::util::WriteLogNumber("network player sync packet rejected: malformed", player_id);
+    return;
+  }
+  if (packet_timestamp != 0 && player.has_sync_state &&
+      static_cast<std::int32_t>(packet_timestamp - player.last_sync_time) < 0) {
+    return;
+  }
+  player.sync_state = sync_state;
+  player.last_sync_time = packet_timestamp;
+  player.has_sync_state = true;
+  ++player.sync_packet_count;
+}
+
 }
 
 bool CreateNetworkClient(const char *host, unsigned short port, const char *name,
@@ -337,6 +589,9 @@ bool CreateNetworkClient(const char *host, unsigned short port, const char *name
   client->peer->RegisterAsRemoteProcedureCall(&g_init_game_rpc_id, &HandleInitGameRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_connection_rejected_rpc_id,
                                                &HandleConnectionRejectedRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_client_message_rpc_id, &HandleClientMessageRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_join_rpc_id, &HandleServerJoinRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_quit_rpc_id, &HandleServerQuitRpc);
   g_client = std::move(client);
   return true;
 }
@@ -369,7 +624,9 @@ void PumpNetworkClient() {
   RakClientInterface &peer = *g_client->peer;
   while (Packet *packet = peer.Receive()) {
     unsigned offset = 0;
+    std::uint32_t packet_timestamp = 0;
     if (packet->length > sizeof(RakNetTime) + 1 && packet->data[0] == ID_TIMESTAMP) {
+      std::memcpy(&packet_timestamp, packet->data + 1, sizeof(packet_timestamp));
       offset = sizeof(RakNetTime) + 1;
     }
     if (packet->length > offset) {
@@ -410,6 +667,9 @@ void PumpNetworkClient() {
           break;
         case ID_RSA_PUBLIC_KEY_MISMATCH:
           samp::util::WriteLogLine("network connection rejected: RSA key mismatch");
+          break;
+        case ID_PLAYER_SYNC:
+          HandlePlayerSyncPacket(*packet, offset, packet_timestamp);
           break;
         default:
           break;
