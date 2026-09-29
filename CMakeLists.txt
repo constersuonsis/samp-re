@@ -17,6 +17,7 @@ add_library(samp_client STATIC
     src/client/controller.cpp
     src/client/session.cpp
     src/client/network_client.cpp
+    src/client/security_archive.cpp
     src/client/tick.cpp
     src/client/spawn.cpp
     src/player/player_colors.cpp

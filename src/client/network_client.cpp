@@ -39,6 +39,7 @@ struct NetworkClient {
   unsigned short port = 0;
   DWORD last_attempt = 0;
   std::uint32_t server_challenge = 0;
+  std::string server_auth_key;
   NetworkState state = NetworkState::Connecting;
 };
 
@@ -66,6 +67,25 @@ bool ReadConnectionAcceptance(Packet &packet, unsigned offset,
   return true;
 }
 
+bool ReadAuthenticationKey(Packet &packet, unsigned offset, std::string &auth_key) {
+  if (packet.length <= offset) {
+    return false;
+  }
+  RakNet::BitStream stream(packet.data + offset, packet.length - offset, false);
+  unsigned char message_id = 0;
+  unsigned char key_length = 0;
+  if (!stream.Read(message_id) || message_id != ID_AUTH_KEY || !stream.Read(key_length) ||
+      stream.GetNumberOfUnreadBits() < key_length * 8) {
+    return false;
+  }
+  std::array<char, 256> key_bytes{};
+  if (!stream.Read(key_bytes.data(), key_length)) {
+    return false;
+  }
+  auth_key.assign(key_bytes.data(), key_length);
+  return true;
+}
+
 bool GenerateJoinKey(char *key, size_t capacity) {
   auto *path = reinterpret_cast<unsigned char *>(0xC9236C);
   const size_t path_length = strnlen_s(reinterpret_cast<const char *>(path), 256);
@@ -79,7 +99,8 @@ bool GenerateJoinKey(char *key, size_t capacity) {
   const unsigned char *digest = sha1.GetHash();
   std::array<std::uint32_t, 6> limbs{};
   for (size_t index = 0; index < SHA1_LENGTH; ++index) {
-    const unsigned char value = digest[index];
+    const size_t word_offset = index & ~static_cast<size_t>(3);
+    const unsigned char value = digest[word_offset + (3 - (index & 3))];
     const unsigned char first = value & 3;
     const unsigned char second = (value >> 2) & 3;
     const unsigned char third = (value >> 4) & 3;
@@ -220,6 +241,9 @@ void PumpNetworkClient() {
     }
     if (packet->length > offset) {
       switch (packet->data[offset]) {
+        case ID_AUTH_KEY:
+          ReadAuthenticationKey(*packet, offset, g_client->server_auth_key);
+          break;
         case ID_CONNECTION_REQUEST_ACCEPTED:
           if (g_client->state != NetworkState::JoiningGame &&
               ReadConnectionAcceptance(*packet, offset, g_client->server_challenge)) {
