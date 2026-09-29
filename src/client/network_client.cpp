@@ -225,6 +225,19 @@ constexpr std::size_t kGravityValueIndex = 4;
 constexpr std::size_t kWorldHourValueIndex = 0;
 constexpr std::size_t kWeatherValueIndex = 1;
 
+void ResetNetworkSession(NetworkClient &client) {
+  for (RemotePlayer &player : client.remote_players) {
+    player = {};
+  }
+  client.server_game_settings = {};
+  client.server_challenge = 0;
+  client.server_auth_key.clear();
+  client.has_server_game_settings = false;
+  SyncTimeOfDay(12, 0);
+  client.last_attempt = ::GetTickCount();
+  client.state = NetworkState::Connecting;
+}
+
 bool ReadConnectionAcceptance(Packet &packet, unsigned offset,
                               std::uint32_t &server_challenge) {
   if (packet.length <= offset) {
@@ -665,6 +678,22 @@ void HandleWorldPlayerRemoveRpc(RPCParameters *parameters) {
     return;
   }
   RemotePlayer &player = g_client->remote_players[player_id];
+  player.sync_state = {};
+  player.vehicle_sync_state = {};
+  player.passenger_sync_state = {};
+  player.aim_sync_state = {};
+  player.bullet_sync_state = {};
+  player.trailer_sync_state = {};
+  player.unoccupied_sync_state = {};
+  player.marker_sync_state = {};
+  player.spawn_state = {};
+  player.last_sync_time = 0;
+  player.last_vehicle_sync_time = 0;
+  player.last_passenger_sync_time = 0;
+  player.last_aim_sync_time = 0;
+  player.last_bullet_sync_time = 0;
+  player.last_trailer_sync_time = 0;
+  player.last_unoccupied_sync_time = 0;
   player.world_spawned = false;
   player.has_spawn_state = false;
   player.has_sync_state = false;
@@ -1301,15 +1330,22 @@ void PumpNetworkClient() {
           }
           break;
         case ID_CONNECTION_ATTEMPT_FAILED:
+          g_client->state = NetworkState::Connecting;
+          samp::util::WriteLogLine("network connection attempt failed; retrying");
+          break;
         case ID_NO_FREE_INCOMING_CONNECTIONS:
           g_client->state = NetworkState::Connecting;
+          samp::util::WriteLogLine("network server is full; retrying");
           break;
         case ID_CONNECTION_LOST:
           peer.Disconnect(0);
-          g_client->state = NetworkState::Connecting;
+          ResetNetworkSession(*g_client);
+          samp::util::WriteLogLine("network connection lost; session cleared, reconnecting");
           break;
         case ID_DISCONNECTION_NOTIFICATION:
           peer.Disconnect(2000);
+          ResetNetworkSession(*g_client);
+          samp::util::WriteLogLine("network server closed the connection; session cleared, reconnecting");
           break;
         case ID_CONNECTION_BANNED:
           samp::util::WriteLogLine("network connection rejected: banned");
