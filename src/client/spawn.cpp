@@ -3,6 +3,7 @@
 #include "samp/game/memory.h"
 #include "samp/util/logger.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -248,6 +249,46 @@ void DoSpawn() {
   samp::util::WriteLogLine("local spawn weather completed");
   SetSpawnUnpaused();
   samp::util::WriteLogLine("local do spawn completed");
+}
+
+bool ApplyServerSpawnInfo(const ServerSpawnInfo &spawn_info) {
+  if (!std::isfinite(spawn_info.position[0]) || !std::isfinite(spawn_info.position[1]) ||
+      !std::isfinite(spawn_info.position[2]) || !std::isfinite(spawn_info.rotation)) {
+    return false;
+  }
+  void *player = LocalPlayer();
+  if (!player) {
+    return false;
+  }
+  auto *vtable = *reinterpret_cast<uintptr_t **>(player);
+  if (!vtable || reinterpret_cast<uintptr_t>(vtable) == 0x863C40) {
+    return false;
+  }
+
+  const unsigned char model_argument_types[] = {1};
+  const unsigned model_argument_values[] = {spawn_info.model_id};
+  InvokeScriptCommand(0x0247, model_argument_types, model_argument_values, 1);
+  InvokeScriptCommand(0x038B, nullptr, nullptr, 0);
+  using SetModelIndex = char(__thiscall *)(void *, unsigned);
+  reinterpret_cast<SetModelIndex>(0x5E4880)(player, spawn_info.model_id);
+
+  const unsigned char position_argument_types[] = {6, 6, 6, 6, 1};
+  const unsigned position_argument_values[] = {
+      FloatToBits(spawn_info.position[0]), FloatToBits(spawn_info.position[1]),
+      FloatToBits(spawn_info.position[2]), FloatToBits(spawn_info.rotation), 0};
+  InvokeScriptCommand(0x016C, position_argument_types, position_argument_values, 5);
+
+  using GiveWeapon = int(__thiscall *)(void *, int, int, int);
+  auto give_weapon = reinterpret_cast<GiveWeapon>(0x5E6080);
+  for (std::size_t index = spawn_info.weapons.size(); index-- > 0;) {
+    if (spawn_info.weapons[index] != 0xFFFFFFFF) {
+      give_weapon(player, static_cast<int>(spawn_info.weapons[index]),
+                  static_cast<int>(spawn_info.ammunition[index]), 1);
+    }
+  }
+  samp::util::WriteLogNumber("network local player spawn model", spawn_info.model_id);
+  samp::util::WriteLogLine("network local player spawn state applied");
+  return true;
 }
 
 void SetSpawnViewBounds() {

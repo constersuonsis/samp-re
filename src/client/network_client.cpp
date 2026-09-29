@@ -203,8 +203,18 @@ struct NetworkClient {
   std::uint32_t server_challenge = 0;
   std::string server_auth_key;
   ServerGameSettings server_game_settings;
+  std::array<std::uint8_t, 46> spawn_info{};
+  ServerSpawnInfo decoded_spawn_info;
+  std::uint32_t selected_class_id = 0;
+  std::uint8_t spawn_request_state = 0;
   std::array<RemotePlayer, 1005> remote_players{};
   bool has_server_game_settings = false;
+  bool has_spawn_info = false;
+  bool has_class_selection_response = false;
+  bool class_selection_accepted = false;
+  bool has_spawn_request_state = false;
+  bool spawn_interpolation_pending = false;
+  bool server_spawn_apply_pending = false;
   NetworkState state = NetworkState::Connecting;
 };
 
@@ -217,6 +227,11 @@ int g_server_quit_rpc_id = 138;
 int g_server_weather_rpc_id = 152;
 int g_server_player_time_rpc_id = 29;
 int g_server_world_time_rpc_id = 94;
+int g_server_gravity_rpc_id = 146;
+int g_server_spawn_info_rpc_id = 68;
+int g_server_class_selection_rpc_id = 128;
+int g_server_request_spawn_rpc_id = 129;
+int g_client_spawn_rpc_id = 52;
 int g_world_player_add_rpc_id = 32;
 int g_world_player_death_rpc_id = 166;
 int g_world_player_remove_rpc_id = 163;
@@ -230,6 +245,16 @@ void ResetNetworkSession(NetworkClient &client) {
     player = {};
   }
   client.server_game_settings = {};
+  client.spawn_info = {};
+  client.decoded_spawn_info = {};
+  client.selected_class_id = 0;
+  client.has_spawn_info = false;
+  client.has_class_selection_response = false;
+  client.class_selection_accepted = false;
+  client.spawn_request_state = 0;
+  client.has_spawn_request_state = false;
+  client.spawn_interpolation_pending = false;
+  client.server_spawn_apply_pending = false;
   client.server_challenge = 0;
   client.server_auth_key.clear();
   client.has_server_game_settings = false;
@@ -590,6 +615,138 @@ void HandleServerWeatherRpc(RPCParameters *parameters) {
   g_client->server_game_settings.byte_values[kWeatherValueIndex] = weather;
   ApplyServerWeather(weather);
   samp::util::WriteLogNumber("network server weather updated", weather);
+}
+
+void HandleServerGravityRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 32) {
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint32_t gravity = 0;
+  if (!payload.Read(gravity)) {
+    samp::util::WriteLogLine("network gravity RPC rejected: invalid payload");
+    return;
+  }
+  g_client->server_game_settings.values[kGravityValueIndex] = gravity;
+  samp::game::WriteDword(reinterpret_cast<void *>(0x863984), gravity);
+  samp::util::WriteLogNumber("network server gravity updated", gravity);
+}
+
+void HandleServerSpawnInfoRpc(RPCParameters *parameters) {
+  constexpr int kSpawnInfoSize = 46;
+  if (!parameters || !g_client || !parameters->input ||
+      parameters->numberOfBitsOfData < kSpawnInfoSize * 8) {
+    samp::util::WriteLogLine("network spawn info RPC rejected: truncated payload");
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::array<std::uint8_t, kSpawnInfoSize> bytes{};
+  if (!payload.Read(reinterpret_cast<char *>(bytes.data()), kSpawnInfoSize)) {
+    samp::util::WriteLogLine("network spawn info RPC rejected: invalid payload");
+    return;
+  }
+  ServerSpawnInfo spawn_info;
+  spawn_info.team = bytes[0];
+  std::memcpy(&spawn_info.model_id, bytes.data() + 1, sizeof(spawn_info.model_id));
+  spawn_info.reserved = bytes[5];
+  std::memcpy(spawn_info.position.data(), bytes.data() + 6, sizeof(spawn_info.position));
+  std::memcpy(&spawn_info.rotation, bytes.data() + 18, sizeof(spawn_info.rotation));
+  std::memcpy(spawn_info.weapons.data(), bytes.data() + 22, sizeof(spawn_info.weapons));
+  std::memcpy(spawn_info.ammunition.data(), bytes.data() + 34,
+              sizeof(spawn_info.ammunition));
+  g_client->spawn_info = bytes;
+  g_client->decoded_spawn_info = spawn_info;
+  g_client->has_spawn_info = true;
+  samp::util::WriteLogNumber("network server spawn model", spawn_info.model_id);
+  samp::util::WriteLogNumber("network server spawn weapon 1", spawn_info.weapons[0]);
+  samp::util::WriteLogNumber("network server spawn weapon 2", spawn_info.weapons[1]);
+  samp::util::WriteLogNumber("network server spawn weapon 3", spawn_info.weapons[2]);
+  samp::util::WriteLogLine("network server spawn info received");
+}
+
+void HandleServerClassSelectionRpc(RPCParameters *parameters) {
+  constexpr int kClassSelectionResponseSize = 1 + 46;
+  if (!parameters || !g_client || !parameters->input ||
+      parameters->numberOfBitsOfData < kClassSelectionResponseSize * 8) {
+    samp::util::WriteLogLine("network class selection RPC rejected: truncated payload");
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  std::uint8_t accepted = 0;
+  std::array<std::uint8_t, 46> bytes{};
+  if (!payload.Read(accepted) ||
+      !payload.Read(reinterpret_cast<char *>(bytes.data()), static_cast<int>(bytes.size()))) {
+    samp::util::WriteLogLine("network class selection RPC rejected: invalid payload");
+    return;
+  }
+  g_client->has_class_selection_response = true;
+  g_client->class_selection_accepted = accepted != 0;
+  if (g_client->class_selection_accepted) {
+    ServerSpawnInfo spawn_info;
+    spawn_info.team = bytes[0];
+    std::memcpy(&spawn_info.model_id, bytes.data() + 1, sizeof(spawn_info.model_id));
+    spawn_info.reserved = bytes[5];
+    std::memcpy(spawn_info.position.data(), bytes.data() + 6,
+                sizeof(spawn_info.position));
+    std::memcpy(&spawn_info.rotation, bytes.data() + 18, sizeof(spawn_info.rotation));
+    std::memcpy(spawn_info.weapons.data(), bytes.data() + 22, sizeof(spawn_info.weapons));
+    std::memcpy(spawn_info.ammunition.data(), bytes.data() + 34,
+                sizeof(spawn_info.ammunition));
+    g_client->spawn_info = bytes;
+    g_client->decoded_spawn_info = spawn_info;
+    g_client->has_spawn_info = true;
+  }
+  samp::util::WriteLogNumber("network class selection accepted",
+                             g_client->class_selection_accepted ? 1 : 0);
+}
+
+void HandleServerRequestSpawnRpc(RPCParameters *parameters) {
+  if (!parameters || !g_client || !parameters->input || parameters->numberOfBitsOfData < 8) {
+    samp::util::WriteLogLine("network spawn request RPC rejected: truncated payload");
+    return;
+  }
+  RakNet::BitStream payload(parameters->input, (parameters->numberOfBitsOfData + 7) / 8, false);
+  if (!payload.Read(g_client->spawn_request_state)) {
+    samp::util::WriteLogLine("network spawn request RPC rejected: invalid payload");
+    return;
+  }
+  g_client->has_spawn_request_state = true;
+  samp::util::WriteLogNumber("network server spawn request state", g_client->spawn_request_state);
+  const bool spawn_was_requested =
+      g_client->spawn_request_state == 2 ||
+      (g_client->spawn_request_state != 0 && g_client->spawn_interpolation_pending);
+  if (!spawn_was_requested) {
+    g_client->spawn_interpolation_pending = false;
+    g_client->server_spawn_apply_pending = false;
+    samp::util::WriteLogLine("network server spawn request ignored");
+    return;
+  }
+  g_client->server_spawn_apply_pending = true;
+  if (!g_client->has_spawn_info) {
+    samp::util::WriteLogLine("network server spawn request waiting for spawn info");
+    return;
+  }
+  samp::util::WriteLogLine("network server spawn request accepted");
+}
+
+void ProcessPendingServerSpawn() {
+  if (!g_client || !g_client->server_spawn_apply_pending || !g_client->has_spawn_info) {
+    return;
+  }
+  if (!ApplyServerSpawnInfo(g_client->decoded_spawn_info)) {
+    g_client->server_spawn_apply_pending = false;
+    g_client->spawn_interpolation_pending = false;
+    samp::util::WriteLogLine("network server spawn application failed");
+    return;
+  }
+  RakNet::BitStream payload;
+  const bool response_sent = g_client->peer->RPC(
+      &g_client_spawn_rpc_id, &payload, HIGH_PRIORITY, RELIABLE_ORDERED, 0, false,
+      UNASSIGNED_NETWORK_ID, nullptr);
+  g_client->server_spawn_apply_pending = false;
+  g_client->spawn_interpolation_pending = false;
+  samp::util::WriteLogLine(response_sent ? "network spawn response sent"
+                                         : "network spawn response send failed");
 }
 
 void HandleServerWorldTimeRpc(RPCParameters *parameters) {
@@ -1207,20 +1364,23 @@ void HandleMarkersSyncPacket(Packet &packet, unsigned offset,
     samp::util::WriteLogLine("network markers sync packet rejected: invalid header");
     return;
   }
-  bool previous_marker_state = packet_id != 0;
+  bool previous_marker_state = true;
   for (std::uint32_t index = 0; index < marker_count; ++index) {
     std::uint16_t player_id = 0;
     bool has_marker = previous_marker_state;
     MarkerSyncState marker_state;
     if (!payload.Read(player_id) ||
-        (payload.GetNumberOfUnreadBits() > 0 && !payload.Read(has_marker)) ||
-        (has_marker && (!payload.Read(marker_state.position[0]) ||
-                        !payload.Read(marker_state.position[1]) ||
-                        !payload.Read(marker_state.position[2])))) {
+        (payload.GetNumberOfUnreadBits() > 0 && !payload.Read(has_marker))) {
       samp::util::WriteLogLine("network markers sync packet rejected: truncated entry");
       return;
     }
     previous_marker_state = has_marker;
+    if (has_marker &&
+        (!payload.Read(marker_state.position[0]) || !payload.Read(marker_state.position[1]) ||
+         !payload.Read(marker_state.position[2]))) {
+      samp::util::WriteLogLine("network markers sync packet rejected: truncated position");
+      return;
+    }
     if (player_id >= 0x3EC || player_id >= g_client->remote_players.size()) {
       continue;
     }
@@ -1264,6 +1424,13 @@ bool CreateNetworkClient(const char *host, unsigned short port, const char *name
   client->peer->RegisterAsRemoteProcedureCall(&g_server_join_rpc_id, &HandleServerJoinRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_quit_rpc_id, &HandleServerQuitRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_weather_rpc_id, &HandleServerWeatherRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_gravity_rpc_id, &HandleServerGravityRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_spawn_info_rpc_id,
+                                               &HandleServerSpawnInfoRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_class_selection_rpc_id,
+                                               &HandleServerClassSelectionRpc);
+  client->peer->RegisterAsRemoteProcedureCall(&g_server_request_spawn_rpc_id,
+                                               &HandleServerRequestSpawnRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_player_time_rpc_id,
                                                &HandleServerPlayerTimeRpc);
   client->peer->RegisterAsRemoteProcedureCall(&g_server_world_time_rpc_id,
@@ -1297,6 +1464,40 @@ void TryConnectNetworkClient() {
   g_client->peer->Connect(g_client->host.c_str(), g_client->port, 0, 0, 2, nullptr);
   g_client->last_attempt = now;
   g_client->state = NetworkState::WaitingForResponse;
+}
+
+bool RequestServerClassSelection(std::uint32_t class_id) {
+  if (!g_client || g_client->state != NetworkState::Active) {
+    return false;
+  }
+  RakNet::BitStream payload;
+  payload.Write(class_id);
+  if (!g_client->peer->RPC(&g_server_class_selection_rpc_id, &payload, HIGH_PRIORITY, RELIABLE,
+                           0, false, UNASSIGNED_NETWORK_ID, nullptr)) {
+    samp::util::WriteLogLine("network class selection send failed");
+    return false;
+  }
+  g_client->selected_class_id = class_id;
+  g_client->has_class_selection_response = false;
+  g_client->class_selection_accepted = false;
+  samp::util::WriteLogNumber("network class selection sent", class_id);
+  return true;
+}
+
+bool RequestServerSpawn() {
+  if (!g_client || g_client->state != NetworkState::Active ||
+      g_client->spawn_interpolation_pending || !g_client->class_selection_accepted) {
+    return false;
+  }
+  RakNet::BitStream payload;
+  if (!g_client->peer->RPC(&g_server_request_spawn_rpc_id, &payload, HIGH_PRIORITY, RELIABLE, 0,
+                           false, UNASSIGNED_NETWORK_ID, nullptr)) {
+    samp::util::WriteLogLine("network spawn request send failed");
+    return false;
+  }
+  g_client->spawn_interpolation_pending = true;
+  samp::util::WriteLogLine("network spawn request sent");
+  return true;
 }
 
 void PumpNetworkClient() {
@@ -1387,6 +1588,7 @@ void PumpNetworkClient() {
     }
     peer.DeallocatePacket(packet);
   }
+  ProcessPendingServerSpawn();
 }
 
 void DestroyNetworkClient() {
